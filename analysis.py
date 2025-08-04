@@ -361,6 +361,86 @@ class Analysis:
               "\n\nRECOMENDAÇÃO: Considere a análise de sensibilidade MNAR para avaliar a robustez"
               "\ndos resultados a diferentes suposições sobre o mecanismo de dados faltantes.")
 
+    def run_diagnostics(self, model_performance: Dict, model_artifacts: Dict, imputed_dataset: pd.DataFrame, original_dataset: pd.DataFrame):
+        """
+        Runs all diagnostic analyses.
+        """
+        self._analyze_model_performance(model_performance)
+        
+        # For sensitivity analysis, we need known counts and classes
+        target_var = self.config.TARGET_VARIABLE
+        known_mask = (original_dataset[target_var] != '99') & original_dataset[target_var].notna()
+        known_data = original_dataset[known_mask]
+        
+        if not known_data.empty:
+            classes_ = sorted([str(c) for c in known_data[target_var].unique() if str(c) != '99' and pd.notna(c)])
+            known_counts = known_data[target_var].value_counts().reindex(classes_, fill_value=0)
+            
+            self._run_mnar_sensitivity_analysis(
+                last_model_artifacts=model_artifacts,
+                known_counts=known_counts,
+                classes_=classes_
+            )
+        else:
+            logger.warning("Skipping MNAR sensitivity analysis because no known data was found.")
+
+        if hasattr(self, 'pooled_metrics') and self.pooled_metrics:
+            original_props = original_dataset[original_dataset[target_var] != '99'][target_var].value_counts(normalize=True)
+            self._analyze_confidence_coverage(self.pooled_metrics, original_props, list(original_props.index))
+        else:
+            logger.warning("Skipping confidence coverage analysis because pooled_metrics are not available.")
+
+    def generate_summary_table(self, pooled_metrics: Dict, original_props: pd.Series, classes_: List[str]) -> pd.DataFrame:
+        """
+        Generates a formatted summary table of the results.
+        """
+        summary_list = []
+        # Original Proportions
+        original_entry = {
+            'Cenário': 'Original (Conhecido)',
+            'Estágio': 'Todos',
+            'Proporção Média': np.nan,
+            'IC Inferior': np.nan,
+            'IC Superior': np.nan,
+            'Aumento Rel. Var.': np.nan,
+            'Fração Info. Perdida': np.nan
+        }
+        summary_list.append(original_entry)
+        for cls, prop in original_props.items():
+            summary_list.append({
+                'Cenário': 'Original (Conhecido)',
+                'Estágio': cls,
+                'Proporção Média': prop,
+                'IC Inferior': prop,
+                'IC Superior': prop,
+                'Aumento Rel. Var.': 0,
+                'Fração Info. Perdida': 0
+            })
+
+        # Pooled Results
+        for scenario, metrics in pooled_metrics.items():
+            for i, cls in enumerate(classes_):
+                summary_list.append({
+                    'Cenário': scenario,
+                    'Estágio': cls,
+                    'Proporção Média': metrics['mean'][i],
+                    'IC Inferior': metrics['ci_lower'][i],
+                    'IC Superior': metrics['ci_upper'][i],
+                    'Aumento Rel. Var.': metrics.get('relative_variance_increase', [np.nan]*len(classes_))[i],
+                    'Fração Info. Perdida': metrics.get('fraction_missing_info', [np.nan]*len(classes_))[i]
+                })
+        
+        df_summary = pd.DataFrame(summary_list)
+        
+        # Formatting
+        format_cols = ['Proporção Média', 'IC Inferior', 'IC Superior', 'Fração Info. Perdida']
+        for col in format_cols:
+            df_summary[col] = df_summary[col].apply(lambda x: f'{x:.2%}' if pd.notna(x) else '-')
+        
+        df_summary['Aumento Rel. Var.'] = df_summary['Aumento Rel. Var.'].apply(lambda x: f'{x:.1f}x' if pd.notna(x) else '-')
+        
+        return df_summary
+
     def create_visualizations(self, results_summary: Dict, scenario_proportions: Dict, 
                               scenario_names: Dict, classes_: List[str]):
         """
@@ -515,7 +595,7 @@ QUALIDADE E DIAGNÓSTICOS:
             logger.info(f"   ✓ Full report: {self.output_prefix}_report.txt")
             
             # Export the imputed datasets
-            self.export_imputed_datasets(last_imputed_dataset)
+            self.export_imputed_datasets({'mar': df_imputed})
 
         except Exception as e:
             logger.error(f"   ❌ Export error: {e}")

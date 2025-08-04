@@ -445,6 +445,9 @@ class ImputationEngine:
         to_impute_mask = (df_full['flag_nao_estadiavel'] == 0) & (df_full[target_ordinal].isna())
         X_to_impute = df_full.loc[to_impute_mask, feature_cols]
         
+        # Initialize artifact variables to prevent NameError if X_to_impute is empty
+        pred_probs_recipients, pred_probs_donors, known_donors_labels = None, None, None
+        
         if not X_to_impute.empty:
             # Get predicted probabilities for recipients (missing values)
             pred_probs_recipients = predict_proba_in_batches(
