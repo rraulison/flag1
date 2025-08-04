@@ -15,7 +15,7 @@ class Config:
 
     # Core Settings
     DEBUG: bool = True
-    N_IMPUTATIONS: int = 5  # Reduced from 100 for testing
+    N_IMPUTATIONS: int = 50  # Increased for more stable variance estimation
     CONFIDENCE_LEVEL: float = 0.95
     TARGET_VARIABLE: str = 'ESTADIAM'
     ORDINAL_TARGET_VARIABLE: str = 'estadiamento_ordinal'

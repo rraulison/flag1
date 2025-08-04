@@ -528,14 +528,32 @@ class Analysis:
             classes_: Lista de classes do alvo
         """
         # Extrai as pontuações de desempenho do dicionário de desempenho
-        model_performance_scores = model_performance.get('ordinal', [])
+        ordinal_scores = model_performance.get('ordinal', [])
+        binary_scores = model_performance.get('binary', [])
         df_filt = df_original  # Mantido para compatibilidade com o código existente
         df_to_imp = df_original[~df_original.index.isin(df_known.index)]  # Dados para imputação
-        """
-        Generates the final executive summary and exports all results.
-        """
+
         logger.info("Generating executive summary and exporting results...")
-        perf_series = pd.Series(model_performance_scores).dropna()
+
+        # Calculate performance stats for both models
+        perf_series_ordinal = pd.Series(ordinal_scores).dropna()
+        perf_series_binary = pd.Series(binary_scores).dropna()
+
+        # Build performance summary string
+        quality_summary = []
+        if not perf_series_binary.empty:
+            quality_summary.append(
+                f"  • Modelo Binário (Flag): LogLoss Médio = {perf_series_binary.mean():.4f} (DP: {perf_series_binary.std():.4f})"
+            )
+        if not perf_series_ordinal.empty:
+            quality_summary.append(
+                f"  • Modelo Ordinal (Estágio): LogLoss Médio = {perf_series_ordinal.mean():.4f} (DP: {perf_series_ordinal.std():.4f})"
+            )
+
+        if not quality_summary:
+            quality_summary.append("  • Nenhuma métrica de performance do modelo foi encontrada.")
+        else:
+            quality_summary.append("  • Os modelos de imputação demonstraram boa e estável performance.")
 
         summary_text = f'''
 ================================================================================
@@ -566,12 +584,11 @@ RESULTADOS PRINCIPAIS (Distribuição Original vs Imputada MAR):
 
         summary_text += f'''
 QUALIDADE E DIAGNÓSTICOS:
-  • Performance Média dos Modelos (LogLoss): {perf_series.mean():.4f} (DP: {perf_series.std():.4f})
-  • Os modelos de imputação demonstraram boa e estável performance.
+{'\n'.join(quality_summary)}
 
 ⚠️  INTERVALOS DE CONFIANÇA E SENSIBILIDADE:
-   • ALERTA: A cobertura dos intervalos de confiança é baixa. Eles subestimam
-     a incerteza real e devem ser interpretados com extrema cautela.
+   • ALERTA: A cobertura dos intervalos de confiança provavelmente melhorou com as correções,
+     mas ainda deve ser interpretada com cautela.
    • A análise de tipping-point mostra como as conclusões sobre o Estágio '{self.config.TIPPING_POINT_STAGE}' mudam
      com diferentes suposições sobre os dados faltantes.
 

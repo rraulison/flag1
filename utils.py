@@ -60,12 +60,14 @@ class PooledMetrics:
         # Total variance with finite-population correction (Barnard & Rubin, 1999)
         T = W + B * (1 + 1/n_imps)
         
-        # FIXED: Proper degrees of freedom calculation (Barnard & Rubin, 1999)
+        # CORRECTED: Proper degrees of freedom calculation (Barnard & Rubin, 1999)
         lambda_hat = (B + B/n_imps) / (T + 1e-10)  # Fraction of missing information
         v_old = (n_imps - 1) / (lambda_hat**2 + 1e-10)  # Old degrees of freedom
-        v_obs = (1 - lambda_hat) * (total_n - 1)  # Observed data degrees of freedom
-        v_com = v_obs + v_old
-        df = v_com * (1 + 1/v_old)**2  # Complete degrees of freedom
+        v_obs = (1 - lambda_hat) * (total_n - 1)  # Observed data DF (large sample approx)
+
+        # Barnard-Rubin adjustment for degrees of freedom
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df = (1 / v_old + 1 / v_obs)**-1
         
         # Calculate confidence intervals with proper t-distribution
         if SCIPY_AVAILABLE:
