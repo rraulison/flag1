@@ -1,3 +1,4 @@
+# this file handles the main pipeline - pipeline.py
 """
 This module defines the main pipeline for the imputation process with robust error handling.
 """
@@ -148,7 +149,13 @@ class Pipeline:
                 self.imputation_engine.run_imputation_loop(df_filt, feature_cols, cat_idx)
             
             logger.info("✓ Imputation process completed successfully.")
-            logger.info(f"  Final imputed dataset shape: {last_imputed_dataset.shape}")
+            if isinstance(last_imputed_dataset, dict):
+                # Log information about each scenario
+                for scenario_name, df in last_imputed_dataset.items():
+                    logger.info(f"  Scenario '{scenario_name}': shape {df.shape}")
+            else:
+                # Fallback for single DataFrame (backward compatibility)
+                logger.info(f"  Final imputed dataset shape: {last_imputed_dataset.shape}")
             
             # 3. Analyze results
             current_step = "analysis"

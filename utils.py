@@ -1,3 +1,4 @@
+# this file enhances utility functions with better error handling and performance. - utils.py
 """
 Enhanced utility functions with better error handling and performance.
 """
@@ -116,20 +117,74 @@ class PooledMetrics:
             'fraction_missing_info': np.full_like(means, np.nan)
         }
 
-def get_pooled_metrics_from_proportions(props_list: List[pd.Series], classes: List[str], 
-                                      n_imps: int, conf_level: float, total_n: int) -> pd.DataFrame:
-    """Enhanced pooled metrics calculation with better error handling."""
-    if not props_list:
-        logging.warning("Empty proportions list provided")
-        return pd.DataFrame(index=classes)
+def get_pooled_metrics_from_proportions(props_list: Union[List[pd.Series], np.ndarray], classes: List[str], 
+                                      n_imps: int, conf_level: float, total_n: int) -> Dict[str, np.ndarray]:
+    """
+    Enhanced pooled metrics calculation with better error handling and array comparison safety.
+    
+    Args:
+        props_list: List of pandas Series or numpy array containing proportions for each imputation
+        classes: List of class names
+        n_imps: Number of imputations
+        conf_level: Confidence level for intervals (e.g., 0.95)
+        total_n: Total number of observations
+        
+    Returns:
+        Dictionary containing pooled metrics (mean, std, ci_lower, ci_upper, etc.)
+    """
+    # Handle empty input cases
+    if props_list is None or (isinstance(props_list, (list, np.ndarray)) and len(props_list) == 0):
+        logging.warning("Empty or None proportions provided")
+        return {}
+        
+    if not classes:
+        logging.warning("No class names provided")
+        return {}
     
     try:
-        props_array = np.array([prop.reindex(classes, fill_value=0).values for prop in props_list])
-        metrics = PooledMetrics.calculate_rubin_metrics(props_array, total_n, conf_level)
-        return pd.DataFrame(metrics, index=classes)
+        # Convert input to numpy array if it isn't already
+        if not isinstance(props_list, np.ndarray):
+            # Handle case where props_list is a list of Series or arrays
+            if hasattr(props_list[0], 'values'):
+                props_array = np.array([prop.reindex(classes, fill_value=0).values 
+                                     for prop in props_list if prop is not None])
+            else:
+                props_array = np.array([np.array(prop) for prop in props_list if prop is not None])
+        else:
+            props_array = props_list
+            
+        # Ensure we have valid data
+        if props_array.size == 0 or np.all(np.isnan(props_array)):
+            logging.warning("No valid data in proportions array")
+            return {}
+            
+        # Ensure the array is 2D (n_imputations × n_classes)
+        if props_array.ndim == 1:
+            props_array = props_array.reshape(1, -1)
+            
+        # Ensure we have the right number of classes
+        if props_array.shape[1] != len(classes):
+            logging.warning(f"Mismatch between number of classes ({len(classes)}) "
+                          f"and array columns ({props_array.shape[1]})")
+            return {}
+            
+        # Calculate metrics using the PooledMetrics class
+        metrics = PooledMetrics.calculate_rubin_metrics(
+            props_array, 
+            total_n, 
+            conf_level
+        )
+        
+        # Ensure all metrics have the same length as classes
+        for key, value in metrics.items():
+            if isinstance(value, np.ndarray) and len(value) != len(classes):
+                metrics[key] = np.full(len(classes), np.nan)
+                
+        return metrics
+        
     except Exception as e:
-        logging.error(f"Error calculating pooled metrics: {e}")
-        return pd.DataFrame(index=classes)
+        logging.error(f"Error in get_pooled_metrics_from_proportions: {str(e)}", exc_info=True)
+        return {}
         
 def safe_pmm_imputation(probs_recipients: np.ndarray, probs_donors: np.ndarray, 
                        y_donors: Union[pd.Series, np.ndarray], k_neighbors: int = 5, 

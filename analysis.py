@@ -1,9 +1,9 @@
-
+# this file handles the analysis of imputation results - analysis.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union
 from pathlib import Path
 
 from . import utils
@@ -19,40 +19,62 @@ class Analysis:
         self.config = config
         self.output_prefix = output_prefix or config.get_output_prefix()
 
-    def analyze_results(self, scenario_proportions: Dict, imputed_dataset: pd.DataFrame, 
-                        original_dataset: pd.DataFrame, model_performance: Dict, 
-                        model_artifacts: Dict) -> tuple:
+    def analyze_results(self, scenario_proportions: Dict, imputed_dataset: Union[pd.DataFrame, Dict[str, pd.DataFrame]], 
+                            original_dataset: pd.DataFrame, model_performance: Dict, 
+                            model_artifacts: Dict) -> tuple:
         """
         Analyzes imputation results and returns a summary.
         
         Args:
             scenario_proportions: Dictionary containing proportions for each scenario
-            imputed_dataset: The final imputed dataset
+            imputed_dataset: The final imputed dataset (can be a single DataFrame or a dict of DataFrames)
             model_performance: Dictionary containing performance metrics for the models
             model_artifacts: Dictionary containing model artifacts
             
         Returns:
             tuple: (results_summary, pooled_metrics, scenario_names, original_props)
         """
+        logger.info("Analyzing imputation results...")
+        
         # Get target variable from config
         target_var = self.config.TARGET_VARIABLE
-
+        
+        # Handle both dict and DataFrame inputs
+        if isinstance(imputed_dataset, dict):
+            # Use MAR scenario as the main dataset for analysis
+            main_imputed_df = imputed_dataset.get('mar')
+            if main_imputed_df is None:
+                raise ValueError("MAR scenario not found in imputed datasets")
+        else:
+            # Backward compatibility
+            main_imputed_df = imputed_dataset
+        
         # Use the original dataset for calculating original proportions
         original_dataset = original_dataset.copy()
         
         try:
+            # Validate input data
+            if main_imputed_df is None or main_imputed_df.empty:
+                raise ValueError("Imputed dataset is empty or None")
+                
+            if original_dataset is None or original_dataset.empty:
+                raise ValueError("Original dataset is empty or None")
+                
             # Ensure target variable exists in the dataset
-            if target_var not in imputed_dataset.columns:
-                raise ValueError(f"Target variable '{target_var}' not found in the dataset")
-            
+            if target_var not in main_imputed_df.columns:
+                raise ValueError(f"Target variable '{target_var}' not found in the imputed dataset")
+                
+            if target_var not in original_dataset.columns:
+                raise ValueError(f"Target variable '{target_var}' not found in the original dataset")
+                
             # Convert target to string and handle missing values
-            imputed_dataset[target_var] = imputed_dataset[target_var].astype(str)
+            main_imputed_df[target_var] = main_imputed_df[target_var].astype(str)
             
             # Get classes from config or infer from data (excluding missing values)
             if hasattr(self.config, 'CLASSES'):
                 classes_ = [str(c) for c in self.config.CLASSES]
             else:
-                classes_ = sorted([str(c) for c in imputed_dataset[target_var].unique() 
+                classes_ = sorted([str(c) for c in main_imputed_df[target_var].unique() 
                                 if str(c) != '99' and pd.notna(c)])
             
             if not classes_:
@@ -61,11 +83,27 @@ class Analysis:
             logger.debug(f"Using classes: {classes_}")
             
             # Calculate original proportions from known data in the original dataset
-            known_mask = (original_dataset[target_var] != '99') & original_dataset[target_var].notna()
-            known_data = original_dataset[known_mask]
-            
-            if len(known_data) == 0:
-                raise ValueError("No known data points found for the target variable in the original dataset")
+            try:
+                # Convert target_var to string for consistent comparison with '99'
+                target_series = original_dataset[target_var].astype(str)
+                known_mask = (target_series != '99') & original_dataset[target_var].notna()
+                
+                if not known_mask.any():
+                    logger.warning("No known data points found (all values are missing or '99')")
+                    known_mask = original_dataset[target_var].notna()  # Fallback to just non-NA values
+                    
+                known_data = original_dataset[known_mask]
+                
+                if len(known_data) == 0:
+                    raise ValueError("No valid known data points found after filtering")
+                    
+            except Exception as e:
+                logger.error(f"Error processing known data: {str(e)}", exc_info=True)
+                # Try to recover by using all non-NA values
+                known_mask = original_dataset[target_var].notna()
+                known_data = original_dataset[known_mask]
+                if len(known_data) == 0:
+                    raise ValueError("No valid data available for analysis") from e
                 
             # Ensure all expected classes are represented in the counts
             original_counts = known_data[target_var].value_counts()
@@ -83,11 +121,27 @@ class Analysis:
             results_summary = {'Original (Conhecido)': original_props}
             pooled_metrics = {}
             
+            # Ensure all expected scenarios are present in the proportions
+            expected_scenarios = ['mar'] + list(getattr(self.config, 'MNAR_SCENARIOS', {}).keys())
+            for scenario in expected_scenarios:
+                if scenario not in scenario_proportions or not scenario_proportions[scenario]:
+                    logger.warning(f"Missing or empty proportions for scenario: {scenario}")
+                    # Initialize with empty list if missing
+                    scenario_proportions[scenario] = []
+        
             # Process each scenario's proportions
-            for scenario_key, proportions in scenario_proportions.items():
+            for scenario_key in expected_scenarios:
+                if scenario_key not in scenario_proportions:
+                    continue
+                
+                proportions = scenario_proportions[scenario_key]
                 display_name = scenario_names.get(scenario_key, scenario_key)
                 
-                if proportions is not None and not (isinstance(proportions, (pd.DataFrame, pd.Series)) and proportions.empty):
+                if not proportions or (isinstance(proportions, (pd.DataFrame, pd.Series)) and proportions.empty):
+                    logger.warning(f"Empty or None proportions for scenario: {scenario_key}")
+                    continue
+                
+                try:
                     # Convert single DataFrame to list of DataFrames if needed
                     if not isinstance(proportions, list):
                         proportions = [proportions]
@@ -98,46 +152,95 @@ class Analysis:
                         if prop is None or (isinstance(prop, (pd.DataFrame, pd.Series)) and prop.empty):
                             continue
                             
-                        # Convert to DataFrame if Series
-                        if isinstance(prop, pd.Series):
-                            prop = prop.to_frame().T
-                        
-                        # Ensure all expected classes are present
-                        for cls in classes_:
-                            if cls not in prop.columns:
-                                prop[cls] = 0.0
-                        
-                        # Reorder columns to match class order
-                        prop = prop[classes_]
-                        valid_proportions.append(prop)
+                        try:
+                            # Convert to DataFrame if Series
+                            if isinstance(prop, pd.Series):
+                                prop = prop.to_frame().T
+                            
+                            # Ensure all expected classes are present
+                            prop = prop.copy()  # Avoid modifying original
+                            for cls in classes_:
+                                if cls not in prop.columns:
+                                    prop[cls] = 0.0
+                            
+                            # Reorder columns to match class order and convert to numpy array
+                            prop_array = prop[classes_].values
+                            if not np.any(np.isnan(prop_array)):  # Only add if no NaNs
+                                valid_proportions.append(prop_array)
+                            
+                        except Exception as e:
+                            logger.warning(f"Error processing proportion for {scenario_key}: {str(e)}")
+                            continue
                     
                     if not valid_proportions:
                         logger.warning(f"No valid proportions for scenario: {scenario_key}")
                         continue
                     
                     # Stack all proportions for the scenario
-                    stacked_proportions = np.vstack([p.values for p in valid_proportions])
-                    
-                    # Calculate metrics for the scenario
                     try:
+                        stacked_proportions = np.vstack(valid_proportions)
+                        
+                        # Skip if no valid data
+                        if stacked_proportions.size == 0 or np.all(np.isnan(stacked_proportions)):
+                            logger.warning(f"No valid data in stacked proportions for {scenario_key}")
+                            continue
+                            
+                        # Ensure we have the right number of dimensions
+                        if len(stacked_proportions.shape) != 2 or stacked_proportions.shape[1] != len(classes_):
+                            logger.warning(f"Invalid shape for {scenario_key} proportions: {stacked_proportions.shape}")
+                            continue
+                            
+                    except Exception as e:
+                        logger.error(f"Error stacking proportions for {scenario_key}: {str(e)}")
+                        continue
+                    
+                    # Calculate metrics for the scenario with robust error handling
+                    try:
+                        n_imputations = len(valid_proportions)
+                        conf_level = getattr(self.config, 'CONFIDENCE_LEVEL', 0.95)
+                        total_n = len(imputed_dataset) if hasattr(imputed_dataset, '__len__') else len(original_dataset)
+                        
+                        logger.debug(f"Calculating metrics for {scenario_key} with {n_imputations} imputations, "
+                                   f"confidence level {conf_level}, total N={total_n}")
+                        
                         metrics = utils.get_pooled_metrics_from_proportions(
                             stacked_proportions,
                             classes_,
-                            len(valid_proportions),
-                            getattr(self.config, 'CONFIDENCE_LEVEL', 0.95),
-                            len(imputed_dataset)
+                            n_imputations,
+                            conf_level,
+                            total_n
                         )
                         
-                        # Store results with proper class alignment
-                        results_summary[display_name] = pd.Series(
-                            metrics['mean'],
-                            index=classes_
-                        )
-                        pooled_metrics[display_name] = metrics
+                        if not metrics or 'mean' not in metrics:
+                            raise ValueError("No valid metrics returned from get_pooled_metrics_from_proportions")
+                            
+                        # Log some debug info
+                        logger.debug(f"Metrics for {scenario_key}: {metrics}")
                         
                     except Exception as e:
-                        logger.error(f"Error calculating metrics for {scenario_key}: {str(e)}")
+                        logger.error(f"Error calculating metrics for {scenario_key}: {str(e)}", exc_info=True)
                         continue
+                    
+                    # Check if we got valid metrics
+                    if not metrics or 'mean' not in metrics or metrics['mean'] is None:
+                        logger.warning(f"No valid metrics returned for {scenario_key}")
+                        continue
+                    
+                    # Ensure all metrics are numpy arrays
+                    for key in metrics:
+                        if not isinstance(metrics[key], np.ndarray):
+                            metrics[key] = np.array(metrics[key])
+                    
+                    # Store results with proper class alignment
+                    results_summary[display_name] = pd.Series(
+                        metrics['mean'],
+                        index=classes_
+                    )
+                    pooled_metrics[display_name] = metrics
+                    
+                except Exception as e:
+                    logger.error(f"Error processing scenario {scenario_key}: {str(e)}", exc_info=True)
+                    continue
             
             # Store pooled metrics for later use in diagnostics
             self.pooled_metrics = pooled_metrics
@@ -319,27 +422,49 @@ class Analysis:
         logger.info("-" * 100)
         
         for scenario_name, metrics in pooled_metrics.items():
-            # Fix: Proper checking for ci_lower existence
-            if 'ci_lower' not in metrics.columns or metrics['ci_lower'].isna().all():
-                continue
+            # Handle both DataFrame and dictionary access patterns
+            if isinstance(metrics, pd.DataFrame):
+                # DataFrame access
+                if 'ci_lower' not in metrics.columns or metrics['ci_lower'].isna().all():
+                    continue
                 
+                ci_lower = metrics['ci_lower'].values
+                ci_upper = metrics['ci_upper'].values
+                rel_var_inc = metrics.get('relative_variance_increase', pd.Series([np.nan] * len(classes_))).mean()
+                frac_missing = metrics.get('fraction_missing_info', pd.Series([np.nan] * len(classes_))).mean()
+            else:
+                # Dictionary access
+                if 'ci_lower' not in metrics or all(pd.isna(metrics['ci_lower'])):
+                    continue
+                
+                ci_lower = metrics['ci_lower']
+                ci_upper = metrics['ci_upper']
+                rel_var_inc = np.mean(metrics.get('relative_variance_increase', [np.nan] * len(classes_)))
+                frac_missing = np.mean(metrics.get('fraction_missing_info', [np.nan] * len(classes_)))
+            
             covered = []
             ci_widths = []
             
             for i, cls in enumerate(classes_):
+                if i >= len(ci_lower) or i >= len(ci_upper):
+                    continue
+                    
                 original_prop = original_props[cls]
-                ci_lower = metrics['ci_lower'].iloc[i]
-                ci_upper = metrics['ci_upper'].iloc[i]
+                lower = ci_lower[i]
+                upper = ci_upper[i]
                 
-                is_covered = ci_lower <= original_prop <= ci_upper
+                if pd.isna(lower) or pd.isna(upper):
+                    continue
+                    
+                is_covered = lower <= original_prop <= upper
                 covered.append(is_covered)
-                ci_widths.append(ci_upper - ci_lower)
+                ci_widths.append(upper - lower)
             
+            if not covered:  # In case all values were NaN
+                continue
+                
             coverage_rate = np.mean(covered)
-            avg_width = np.mean(ci_widths)
-            
-            rel_var_inc = metrics.get('relative_variance_increase', pd.Series([np.nan] * len(classes_))).mean()
-            frac_missing = metrics.get('fraction_missing_info', pd.Series([np.nan] * len(classes_))).mean()
+            avg_width = np.mean(ci_widths) if ci_widths else np.nan
             
             covered_classes = [str(cls) for i, cls in enumerate(classes_) if covered[i]]
             not_covered = [str(classes_[i]) for i, c in enumerate(covered) if not c]
@@ -361,15 +486,23 @@ class Analysis:
               "\n\nRECOMENDAÇÃO: Considere a análise de sensibilidade MNAR para avaliar a robustez"
               "\ndos resultados a diferentes suposições sobre o mecanismo de dados faltantes.")
 
-    def run_diagnostics(self, model_performance: Dict, model_artifacts: Dict, imputed_dataset: pd.DataFrame, original_dataset: pd.DataFrame):
+    def run_diagnostics(self, model_performance: Dict, model_artifacts: Dict, imputed_dataset: Union[pd.DataFrame, Dict[str, pd.DataFrame]], original_dataset: pd.DataFrame):
         """
         Runs all diagnostic analyses.
+        
+        Args:
+            model_performance: Dictionary containing performance metrics for the models
+            model_artifacts: Dictionary containing model artifacts
+            imputed_dataset: The imputed dataset (can be a single DataFrame or a dict of DataFrames)
+            original_dataset: The original dataset before imputation
         """
         self._analyze_model_performance(model_performance)
         
         # For sensitivity analysis, we need known counts and classes
         target_var = self.config.TARGET_VARIABLE
-        known_mask = (original_dataset[target_var] != '99') & original_dataset[target_var].notna()
+        # Convert target_var to string for consistent comparison with '99'
+        target_series = original_dataset[target_var].astype(str)
+        known_mask = (target_series != '99') & original_dataset[target_var].notna()
         known_data = original_dataset[known_mask]
         
         if not known_data.empty:
@@ -392,54 +525,147 @@ class Analysis:
 
     def generate_summary_table(self, pooled_metrics: Dict, original_props: pd.Series, classes_: List[str]) -> pd.DataFrame:
         """
-        Generates a formatted summary table of the results.
+        Generates a formatted summary table of the results with robust error handling.
+        
+        Args:
+            pooled_metrics: Dictionary containing metrics for each scenario
+            original_props: Series with original proportions for each class
+            classes_: List of class names/stages
+            
+        Returns:
+            pd.DataFrame: Formatted summary table with all scenarios and metrics
         """
         summary_list = []
-        # Original Proportions
-        original_entry = {
-            'Cenário': 'Original (Conhecido)',
-            'Estágio': 'Todos',
-            'Proporção Média': np.nan,
-            'IC Inferior': np.nan,
-            'IC Superior': np.nan,
-            'Aumento Rel. Var.': np.nan,
-            'Fração Info. Perdida': np.nan
-        }
-        summary_list.append(original_entry)
-        for cls, prop in original_props.items():
-            summary_list.append({
-                'Cenário': 'Original (Conhecido)',
-                'Estágio': cls,
-                'Proporção Média': prop,
-                'IC Inferior': prop,
-                'IC Superior': prop,
-                'Aumento Rel. Var.': 0,
-                'Fração Info. Perdida': 0
-            })
-
-        # Pooled Results
-        for scenario, metrics in pooled_metrics.items():
-            for i, cls in enumerate(classes_):
+        
+        try:
+            # Validate inputs
+            if not isinstance(original_props, (pd.Series, dict)) or not original_props.any():
+                logger.warning("Invalid or empty original_props, using placeholder values")
+                original_props = pd.Series(index=classes_, data=1.0/len(classes_) if classes_ else [])
+                
+            if not classes_:
+                logger.warning("No classes provided, using default classes")
+                classes_ = [str(i) for i in range(len(original_props))] if not original_props.empty else ['0']
+                
+            # Original Proportions - Summary Row
+            try:
                 summary_list.append({
-                    'Cenário': scenario,
-                    'Estágio': cls,
-                    'Proporção Média': metrics['mean'][i],
-                    'IC Inferior': metrics['ci_lower'][i],
-                    'IC Superior': metrics['ci_upper'][i],
-                    'Aumento Rel. Var.': metrics.get('relative_variance_increase', [np.nan]*len(classes_))[i],
-                    'Fração Info. Perdida': metrics.get('fraction_missing_info', [np.nan]*len(classes_))[i]
+                    'Cenário': 'Original (Conhecido)',
+                    'Estágio': 'Todos',
+                    'Proporção Média': original_props.sum(),
+                    'IC Inferior': original_props.sum(),
+                    'IC Superior': original_props.sum(),
+                    'Aumento Rel. Var.': 0.0,
+                    'Fração Info. Perdida': 0.0
                 })
-        
-        df_summary = pd.DataFrame(summary_list)
-        
-        # Formatting
-        format_cols = ['Proporção Média', 'IC Inferior', 'IC Superior', 'Fração Info. Perdida']
-        for col in format_cols:
-            df_summary[col] = df_summary[col].apply(lambda x: f'{x:.2%}' if pd.notna(x) else '-')
-        
-        df_summary['Aumento Rel. Var.'] = df_summary['Aumento Rel. Var.'].apply(lambda x: f'{x:.1f}x' if pd.notna(x) else '-')
-        
-        return df_summary
+            except Exception as e:
+                logger.error(f"Error creating summary row: {str(e)}", exc_info=True)
+                summary_list.append({
+                    'Cenário': 'Original (Conhecido',
+                    'Estágio': 'Erro',
+                    'Proporção Média': np.nan,
+                    'IC Inferior': np.nan,
+                    'IC Superior': np.nan,
+                    'Aumento Rel. Var.': np.nan,
+                    'Fração Info. Perdida': np.nan
+                })
+            
+            # Original Proportions - Per Class
+            for cls in classes_:
+                try:
+                    prop = original_props.get(str(cls), 0.0)  # Handle both string and numeric keys
+                    if not isinstance(prop, (int, float)) or np.isnan(prop):
+                        prop = 0.0
+                        
+                    summary_list.append({
+                        'Cenário': 'Original (Conhecido)',
+                        'Estágio': str(cls),
+                        'Proporção Média': float(prop),
+                        'IC Inferior': float(prop),
+                        'IC Superior': float(prop),
+                        'Aumento Rel. Var.': 0.0,
+                        'Fração Info. Perdida': 0.0
+                    })
+                except Exception as e:
+                    logger.error(f"Error processing class {cls}: {str(e)}", exc_info=True)
+                    continue
+
+            # Pooled Results for Each Scenario
+            for scenario, metrics in (pooled_metrics or {}).items():
+                if not metrics or not isinstance(metrics, dict):
+                    logger.warning(f"Skipping invalid metrics for scenario: {scenario}")
+                    continue
+                    
+                try:
+                    # Get all metrics with safe defaults
+                    means = metrics.get('mean', np.array([np.nan] * len(classes_)))
+                    ci_lower = metrics.get('ci_lower', np.array([np.nan] * len(classes_)))
+                    ci_upper = metrics.get('ci_upper', np.array([np.nan] * len(classes_)))
+                    rel_var = metrics.get('relative_variance_increase', np.array([np.nan] * len(classes_)))
+                    frac_missing = metrics.get('fraction_missing_info', np.array([np.nan] * len(classes_)))
+                    
+                    # Add row for each class
+                    for i, cls in enumerate(classes_):
+                        try:
+                            summary_list.append({
+                                'Cenário': str(scenario),
+                                'Estágio': str(cls),
+                                'Proporção Média': float(means[i]) if i < len(means) else np.nan,
+                                'IC Inferior': float(ci_lower[i]) if i < len(ci_lower) else np.nan,
+                                'IC Superior': float(ci_upper[i]) if i < len(ci_upper) else np.nan,
+                                'Aumento Rel. Var.': float(rel_var[i]) if i < len(rel_var) else np.nan,
+                                'Fração Info. Perdida': float(frac_missing[i]) if i < len(frac_missing) else np.nan
+                            })
+                        except (IndexError, TypeError, ValueError) as e:
+                            logger.error(f"Error processing class {i} in scenario {scenario}: {str(e)}", exc_info=True)
+                            continue
+                            
+                except Exception as e:
+                    logger.error(f"Error processing scenario {scenario}: {str(e)}", exc_info=True)
+                    continue
+            
+            # Create DataFrame
+            df_summary = pd.DataFrame(summary_list)
+            
+            # Ensure all required columns exist
+            required_cols = ['Cenário', 'Estágio', 'Proporção Média', 'IC Inferior', 
+                            'IC Superior', 'Aumento Rel. Var.', 'Fração Info. Perdida']
+            for col in required_cols:
+                if col not in df_summary.columns:
+                    df_summary[col] = np.nan
+            
+            # Format numeric columns
+            try:
+                format_cols = ['Proporção Média', 'IC Inferior', 'IC Superior', 'Fração Info. Perdida']
+                for col in format_cols:
+                    if col in df_summary.columns:
+                        # Convert to numeric, coerce errors to NaN
+                        df_summary[col] = pd.to_numeric(df_summary[col], errors='coerce')
+                        # Format as percentage
+                        df_summary[col] = df_summary[col].apply(
+                            lambda x: f'{x:.2%}' if pd.notna(x) and np.isfinite(x) else '-'
+                        )
+                
+                # Format relative variance
+                if 'Aumento Rel. Var.' in df_summary.columns:
+                    df_summary['Aumento Rel. Var.'] = pd.to_numeric(
+                        df_summary['Aumento Rel. Var.'], errors='coerce'
+                    ).apply(lambda x: f'{x:.1f}x' if pd.notna(x) and np.isfinite(x) else '-')
+                    
+            except Exception as e:
+                logger.error(f"Error formatting table: {str(e)}", exc_info=True)
+                # Return unformatted table if formatting fails
+                pass
+                
+            return df_summary
+            
+        except Exception as e:
+            logger.critical(f"Critical error generating summary table: {str(e)}", exc_info=True)
+            # Return minimal error table
+            return pd.DataFrame({
+                'Cenário': ['Erro'],
+                'Mensagem': [f'Erro ao gerar tabela: {str(e)}']
+            })
 
     def create_visualizations(self, results_summary: Dict, scenario_proportions: Dict, 
                               scenario_names: Dict, classes_: List[str]):
@@ -448,6 +674,54 @@ class Analysis:
         """
         self._plot_results_barchart(results_summary, scenario_names)
         self._plot_convergence_traces(scenario_proportions, scenario_names, classes_)
+        self._plot_imputation_distribution_chart(results_summary, scenario_names, classes_)
+
+    def _plot_imputation_distribution_chart(self, results_summary: Dict, scenario_names: Dict, classes_: List[str]):
+        """Generates a bar chart comparing ESTADIAM distribution across all scenarios."""
+        
+        # Use the pooled metrics for imputed scenarios and original props for the known data
+        df_plot = pd.DataFrame(results_summary).sort_index()
+        
+        # Ensure all scenarios are present and have the correct names
+        df_plot.rename(columns=scenario_names, inplace=True)
+
+        # Sort columns to have a consistent order: Original, MAR, then MNARs
+        ordered_columns = ['Original (Conhecido)', 'Imputado MAR (PMM)'] + \
+                          [v for k, v in scenario_names.items() if k != 'mar']
+        
+        # Filter out any columns that might not be in the results_summary
+        ordered_columns = [col for col in ordered_columns if col in df_plot.columns]
+        df_plot = df_plot[ordered_columns]
+
+        ax = df_plot.plot(kind='bar', figsize=(16, 9), width=0.85, 
+                           colormap='viridis')
+
+        plt.title(f'Distribuição de ESTADIAM por Cenário de Imputação (M={self.config.N_IMPUTATIONS})', 
+                  fontsize=16, fontweight='bold')
+        plt.ylabel('Proporção Estimada', fontsize=12)
+        plt.xlabel('Estadiamento Clínico', fontsize=12)
+        plt.xticks(rotation=0, fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.legend(title='Cenários', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10)
+        
+        # Add percentage labels on top of each bar
+        for p in ax.patches:
+            ax.annotate(f'{p.get_height():.1%}', 
+                        (p.get_x() + p.get_width() / 2., p.get_height()), 
+                        ha='center', va='center', 
+                        xytext=(0, 9), 
+                        textcoords='offset points', 
+                        fontsize=8, 
+                        color='black')
+
+        plt.tight_layout(rect=[0, 0, 0.85, 1]) # Adjust layout to make space for legend
+        
+        # Save the figure
+        output_path = f"{self.output_prefix}_distribution_by_scenario.png"
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+        logger.info(f"Saved imputation distribution chart to {output_path}")
 
     def _plot_results_barchart(self, results_summary: Dict, scenario_names: Dict):
         """
@@ -531,6 +805,17 @@ class Analysis:
         model_performance_scores = model_performance.get('ordinal', [])
         df_filt = df_original  # Mantido para compatibilidade com o código existente
         df_to_imp = df_original[~df_original.index.isin(df_known.index)]  # Dados para imputação
+        
+        # Debug: Log the available keys in results_summary
+        logger.debug(f"Available result keys: {list(results_summary.keys())}")
+        
+        # Normalize MAR scenario name
+        mar_key = next((k for k in results_summary.keys() if 'mar' in k.lower() or 'pmm' in k.lower()), None)
+        
+        if mar_key is None and results_summary:
+            mar_key = list(results_summary.keys())[0]  # Fallback to first key if no MAR found
+            logger.warning(f"No explicit MAR scenario found, using first available: {mar_key}")
+        
         """
         Generates the final executive summary and exports all results.
         """
@@ -555,14 +840,31 @@ METODOLOGIA REVISADA:
 
 RESULTADOS PRINCIPAIS (Distribuição Original vs Imputada MAR):
 '''
-        if 'Imputado MAR (PMM)' in results_summary:
-            mar_results = results_summary['Imputado MAR (PMM)']
+        if mar_key and mar_key in results_summary and 'Original' in results_summary:
+            mar_results = results_summary[mar_key]
             original_props = results_summary['Original (Conhecido)']
+            
+            # Debug logging
+            logger.debug(f"Using MAR key: {mar_key}")
+            logger.debug(f"MAR results: {mar_results}")
+            logger.debug(f"Original props: {original_props}")
+            
             for cls in classes_:
-                orig_pct = original_props.get(int(cls), 0) * 100
-                imp_pct = mar_results.get(cls, 0) * 100
-                diff = imp_pct - orig_pct
-                summary_text += f"   • Estágio {cls}: {orig_pct:.1f}% → {imp_pct:.1f}% ({diff:+.1f}pp)\n"
+                try:
+                    # Handle different possible class types (int/str)
+                    cls_key = str(cls).strip()
+                    orig_val = original_props.get(int(cls), original_props.get(cls_key, 0))
+                    imp_val = mar_results.get(int(cls), mar_results.get(cls_key, 0))
+                    
+                    # Convert to percentages
+                    orig_pct = orig_val * 100
+                    imp_pct = imp_val * 100
+                    diff = imp_pct - orig_pct
+                    
+                    summary_text += f"   • Estágio {cls}: {orig_pct:.1f}% → {imp_pct:.1f}% ({diff:+.1f}pp)\n"
+                except Exception as e:
+                    logger.warning(f"Error processing class {cls}: {e}")
+                    continue
 
         summary_text += f'''
 QUALIDADE E DIAGNÓSTICOS:
@@ -595,7 +897,11 @@ QUALIDADE E DIAGNÓSTICOS:
             logger.info(f"   ✓ Full report: {self.output_prefix}_report.txt")
             
             # Export the imputed datasets
-            self.export_imputed_datasets({'mar': df_imputed})
+            if isinstance(df_imputed, dict):
+                self.export_imputed_datasets(df_imputed)
+            else:
+                logger.warning(f"Expected df_imputed to be a dict, got {type(df_imputed).__name__}")
+                self.export_imputed_datasets({'mar': df_imputed})
 
         except Exception as e:
             logger.error(f"   ❌ Export error: {e}")

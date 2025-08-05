@@ -48,9 +48,63 @@ class ImputationEngine:
         self.model_performance = {'binary': [], 'ordinal': []}
         self.last_model_artifacts = {}
         
-        # Initialize model performance tracking
-        self.model_performance = {'binary': [], 'ordinal': []}
-        self.last_model_artifacts = {}
+        # Ensure checkpoint directory exists
+        self.checkpoint_dir = Path(self.config.CHECKPOINT_DIR)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    def _save_checkpoint(self, iteration: int, imputation_results: List[pd.DataFrame]) -> None:
+        """
+        Save checkpoint with atomic write to prevent corruption.
+        
+        Args:
+            iteration: Current iteration number
+            imputation_results: List of DataFrames with imputation results
+        """
+        checkpoint_path = self.checkpoint_dir / f'imputation_checkpoint_{iteration}.pkl'
+        temp_path = checkpoint_path.with_suffix('.tmp')
+        
+        state = {
+            'iteration': iteration,
+            'model_performance': self.model_performance,
+            'last_model_artifacts': self.last_model_artifacts,
+            'imputation_results': imputation_results
+        }
+        
+        try:
+            # Write to temporary file first
+            with open(temp_path, 'wb') as f:
+                pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            # Atomic rename (POSIX operation)
+            temp_path.replace(checkpoint_path)
+            logger.info(f"Successfully saved checkpoint for iteration {iteration}")
+            
+        except Exception as e:
+            # Clean up temporary file if it exists
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception as cleanup_error:
+                    logger.error(f"Failed to clean up temporary checkpoint file: {cleanup_error}")
+            
+            logger.error(f"Failed to save checkpoint for iteration {iteration}: {e}")
+            raise
+    
+    def _load_checkpoint(self, iteration: int) -> Optional[dict]:
+        """Load a previously saved checkpoint."""
+        checkpoint_path = self.checkpoint_dir / f'imputation_checkpoint_{iteration}.pkl'
+        if checkpoint_path.exists():
+            with open(checkpoint_path, 'rb') as f:
+                return pickle.load(f)
+        return None
+    
+    def _cleanup_checkpoints(self):
+        """Remove checkpoint files after successful completion."""
+        for file in self.checkpoint_dir.glob('imputation_checkpoint_*.pkl'):
+            try:
+                file.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to delete checkpoint {file}: {e}")
     
     def run_imputation_loop(
         self, df: pd.DataFrame, feature_cols: List[str], cat_idx: List[int]
@@ -72,9 +126,24 @@ class ImputationEngine:
         """
         logger.info(f"Starting imputation loop with {self.config.N_IMPUTATIONS} iterations.")
         
-        # Initialize results storage
-        start_iter = 0
-        imputation_results = []
+        # Check for existing checkpoints
+        last_checkpoint = None
+        for i in range(self.config.N_IMPUTATIONS - 1, -1, -1):
+            checkpoint = self._load_checkpoint(i)
+            if checkpoint:
+                last_checkpoint = checkpoint
+                logger.info(f"Resuming from checkpoint at iteration {i+1}")
+                break
+        
+        if last_checkpoint:
+            # Restore state from checkpoint
+            start_iter = last_checkpoint['iteration'] + 1
+            imputation_results = last_checkpoint['imputation_results']
+            self.model_performance = last_checkpoint['model_performance']
+            self.last_model_artifacts = last_checkpoint['last_model_artifacts']
+        else:
+            start_iter = 0
+            imputation_results = []
         
         try:
             for i in range(start_iter, self.config.N_IMPUTATIONS):
@@ -87,6 +156,11 @@ class ImputationEngine:
                             df, feature_cols, cat_idx, i
                         )
                         imputation_results.append(imputed_df_single_run)
+                        
+                        # Save checkpoint if enabled
+                        if self.config.CHECKPOINT_INTERVAL > 0 and \
+                           (i + 1) % self.config.CHECKPOINT_INTERVAL == 0:
+                            self._save_checkpoint(i, imputation_results)
                         
                         iteration_time = time.time() - start_time
                         logger.info(f"Completed imputation {i+1}/{self.config.N_IMPUTATIONS} "
@@ -101,9 +175,15 @@ class ImputationEngine:
                 
                 except Exception as e:
                     logger.error(f"Imputation {i + 1} failed: {e}", exc_info=True)
+                    # Save failed state for debugging
+                    self._save_checkpoint(f"failed_{i}", imputation_results)
                     raise
             
             logger.info("Finished all imputation iterations.")
+            
+            # Clean up checkpoints on successful completion
+            if not self.config.DEBUG:
+                self._cleanup_checkpoints()
             
             # Return the final results
             if not imputation_results:

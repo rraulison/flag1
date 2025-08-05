@@ -1,3 +1,4 @@
+# this file handles the data processing - data_processing.py
 import pandas as pd
 import numpy as np
 import logging
@@ -135,10 +136,19 @@ class DataProcessor:
         # Known data now includes cases where estadiamento_ordinal is not null
         df_known = df_filt[df_filt[target].notna()].copy().reset_index(drop=True)
         
-        # To-impute data are cases where estadiamento_ordinal is null AND flag_nao_estadiavel is 0
+        # To-impute data are cases where estadiamento_ordinal is null AND 
+        # (flag_nao_estadiavel is 0 OR ESTADIAM is '99')
         df_to_imp = df_filt[
-            (df_filt[target].isna()) & (df_filt['flag_nao_estadiavel'] == 0)
+            (df_filt[target].isna()) & 
+            ((df_filt['flag_nao_estadiavel'] == 0) | 
+             (df_filt[self.config.TARGET_VARIABLE].astype(str) == '99'))
         ].copy().reset_index(drop=True)
+        
+        # Log how many records are being included due to ESTADIAM='99'
+        est_99_count = ((df_filt[target].isna()) & 
+                       (df_filt[self.config.TARGET_VARIABLE].astype(str) == '99')).sum()
+        if est_99_count > 0:
+            logger.info(f"Including {est_99_count} records with ESTADIAM='99' for imputation")
 
         X_known = df_known[feature_cols].copy()
         y_known = df_known[target].copy()

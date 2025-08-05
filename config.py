@@ -1,3 +1,5 @@
+# this file handles the configuration of variables - config.py
+
 """
 Enhanced configuration with better organization and validation.
 """
@@ -26,10 +28,7 @@ class Config:
     EARLY_STOPPING_ROUNDS: int = 20  # Reduced for faster convergence
     K_PMM_NEIGHBORS: int = 5  # Reduced number of neighbors for faster PMM
     
-    # Checkpoint Settings
-    CHECKPOINT_INTERVAL: int = 1  # Save checkpoint after each imputation
-    CHECKPOINT_DIR: Path = _BASE_DIR / 'checkpoints'  # Directory to save checkpoints
-    
+
     # Data Settings
     DATA_FILE: Path = _BASE_DIR / 'data' / 'df_preprocessed.parquet'
     FEATURE_IMPORTANCE_FILE: Path = _BASE_DIR / 'data' / 'results' / 'selected_features_cv.csv'
@@ -67,15 +66,9 @@ class Config:
         "task_type": "GPU",
         "verbose": False,
         "allow_writing_files": False,
-        "thread_count": -1,
         "bootstrap_type": "Bernoulli",
-        # GPU memory management
-        "gpu_ram_part": 0.7,  # Use 70% of GPU RAM
-        "devices": "0",  # Use only first GPU
-        "gpu_cat_features_storage": "CpuPinnedMemory",  # Better memory management
-        "task_type": "GPU",
-        "used_ram_limit": "8gb",  # Limit GPU memory usage
-        "max_ctr_complexity": 4,  # Limit complexity for categorical features
+        # Use all available CPU cores
+        "thread_count": -1
     }
     
     # Ordinal Classifier Parameters (for staging classification)
@@ -94,15 +87,9 @@ class Config:
         "task_type": "GPU",
         "verbose": False,
         "allow_writing_files": False,
-        "thread_count": -1,
         "bootstrap_type": "Bernoulli",
-        # GPU memory management
-        "gpu_ram_part": 0.7,  # Use 70% of GPU RAM
-        "devices": "0",  # Use only first GPU
-        "gpu_cat_features_storage": "CpuPinnedMemory",  # Better memory management
-        "task_type": "GPU",
-        "used_ram_limit": "8gb",  # Limit GPU memory usage
-        "max_ctr_complexity": 4,  # Limit complexity for categorical features
+        # Use all available CPU cores
+        "thread_count": -1
     }
 
     @classmethod
@@ -126,10 +113,10 @@ class Config:
             assert param_dict.get('iterations', 0) > 0, "Iterations must be positive"
             assert 0 < param_dict.get('learning_rate', 0.1) <= 1, "Learning rate must be in (0, 1]"
             assert param_dict.get('depth', 0) > 0, "Depth must be positive"
-            assert 0 < param_dict.get('gpu_ram_part', 1) <= 1, "GPU RAM part must be in (0, 1]"
+
         
         # Ensure required directories exist
-        required_dirs = [cls.OUTPUT_DIR, cls.CHECKPOINT_DIR]
+        required_dirs = [cls.OUTPUT_DIR]
         for dir_path in required_dirs:
             try:
                 dir_path.mkdir(parents=True, exist_ok=True)
