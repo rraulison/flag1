@@ -1,0 +1,12 @@
+2025-08-05 11:30:01,009 - flag1.src.pipeline - INFO - Initializing pipeline components...
+2025-08-05 11:30:01,009 - flag1.src.pipeline - INFO - Pipeline initialized successfully. Output will be saved to: /home/remo/inca/flag1/outputs/cancer_staging_imputation_20250805_113001
+2025-08-05 11:30:01,009 - flag1.src.pipeline - INFO - ================================================================================
+2025-08-05 11:30:01,009 - flag1.src.pipeline - INFO - STARTING PIPELINE EXECUTION - 2025-08-05 11:30:01.009887
+2025-08-05 11:30:01,009 - flag1.src.pipeline - INFO - ================================================================================
+2025-08-05 11:30:01,009 - flag1.src.pipeline - INFO - 
+==================================================
+2025-08-05 11:30:01,010 - flag1.src.pipeline - INFO - STEP 1/4: LOADING AND PREPROCESSING DATA
+2025-08-05 11:30:01,010 - flag1.src.pipeline - INFO - ==================================================
+2025-08-05 11:30:01,010 - flag1.src.data_processing - INFO - Loading data from /home/remo/inca/flag1/data/df_preprocessed.parquet
+2025-08-05 11:30:01,581 - flag1.src.data_processing - INFO - Loading feature importance from /home/remo/inca/flag1/data/results/selected_features_cv.csv
+2025-08-05 11:30:01,584 - flag1.src.data_processing - INFO - Selected 26 features.

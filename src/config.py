@@ -84,7 +84,7 @@ class Config:
 
     # Core Settings
     DEBUG: bool = True
-    N_IMPUTATIONS: int = 1  # Reduced from 100 for testing
+    N_IMPUTATIONS: int = 100  # Reduced from 100 for testing
     CONFIDENCE_LEVEL: float = 0.95
     TARGET_VARIABLE: str = 'ESTADIAM'
     ORDINAL_TARGET_VARIABLE: str = 'estadiamento_ordinal'
@@ -97,7 +97,7 @@ class Config:
     RECIPIENT_QUERY_BATCH_SIZE: int = 50000  # Reduced batch size for better memory management
     SUBSAMPLE_RATIO: float = 0.8  # Slightly reduced for faster training
     EARLY_STOPPING_ROUNDS: int = 20  # Reduced for faster convergence
-    K_PMM_NEIGHBORS: int = 5  # Reduced number of neighbors for faster PMM
+    K_PMM_NEIGHBORS: int = 10  # Reduced number of neighbors for faster PMM
     
 
     # Data Settings

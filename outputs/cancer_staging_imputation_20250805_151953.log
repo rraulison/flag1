@@ -1,0 +1,278 @@
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - Initializing pipeline components...
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - Pipeline initialized successfully. Output will be saved to: /home/remo/inca/flag1/outputs/cancer_staging_imputation_20250805_151953
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - ================================================================================
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - STARTING PIPELINE EXECUTION - 2025-08-05 15:19:53.289422
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - ================================================================================
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - 
+==================================================
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - STEP 1/4: LOADING AND PREPROCESSING DATA
+2025-08-05 15:19:53,289 - flag1.src.pipeline - INFO - ==================================================
+2025-08-05 15:19:53,289 - flag1.src.data_processing - INFO - Loading data from /home/remo/inca/flag1/data/df_preprocessed.parquet
+2025-08-05 15:19:55,194 - flag1.src.data_processing - INFO - Loading feature importance from /home/remo/inca/flag1/data/results/selected_features_cv.csv
+2025-08-05 15:19:55,247 - flag1.src.data_processing - INFO - Selected 26 features.
+2025-08-05 15:19:55,599 - flag1.src.data_processing - INFO - Distribution of flag_nao_estadiavel:
+flag_nao_estadiavel
+0.0    1420537
+NaN    1053932
+1.0     402028
+Name: count, dtype: int64
+2025-08-05 15:19:55,627 - flag1.src.data_processing - INFO - Distribution of estadiamento_ordinal:
+estadiamento_ordinal
+0.0      63256
+1.0     299066
+2.0     360358
+3.0     345896
+4.0     351961
+NaN    1455960
+Name: count, dtype: int64
+2025-08-05 15:19:55,658 - flag1.src.data_processing - INFO - Columns with missing data: ['LOCTUDET', 'LOCTUPRI', 'OUTROESTA', 'DTTRIAGE', 'ANTRI', 'DATAINITRT', 'flag_nao_estadiavel', 'estadiamento_ordinal']
+2025-08-05 15:19:55,660 - flag1.src.data_processing - INFO -   LOCTUDET: 3 missing values
+2025-08-05 15:19:55,661 - flag1.src.data_processing - INFO -   LOCTUPRI: 3 missing values
+2025-08-05 15:19:55,663 - flag1.src.data_processing - INFO -   OUTROESTA: 31596 missing values
+2025-08-05 15:19:55,665 - flag1.src.data_processing - INFO -   DTTRIAGE: 379706 missing values
+2025-08-05 15:19:55,667 - flag1.src.data_processing - INFO -   ANTRI: 379706 missing values
+2025-08-05 15:19:55,668 - flag1.src.data_processing - INFO -   DATAINITRT: 495167 missing values
+2025-08-05 15:19:55,672 - flag1.src.data_processing - INFO -   flag_nao_estadiavel: 1053932 missing values
+2025-08-05 15:19:55,675 - flag1.src.data_processing - INFO -   estadiamento_ordinal: 1455960 missing values
+2025-08-05 15:19:56,028 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: TNM
+2025-08-05 15:19:56,362 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: CNES
+2025-08-05 15:19:56,507 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: T
+2025-08-05 15:19:56,845 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: MUUH
+2025-08-05 15:19:56,970 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: LOCTUDET
+2025-08-05 15:19:57,109 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: M
+2025-08-05 15:19:57,233 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: LOCTUPRI
+2025-08-05 15:19:57,558 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: PTNM
+2025-08-05 15:19:57,835 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: UFUH
+2025-08-05 15:19:58,140 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: PRITRATH
+2025-08-05 15:19:58,280 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: N
+2025-08-05 15:19:58,420 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: pT
+2025-08-05 15:19:58,559 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: pM
+2025-08-05 15:19:58,694 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: OUTROESTA
+2025-08-05 15:19:58,966 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: CLITRAT
+2025-08-05 15:19:59,146 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: ESTDFIMT
+2025-08-05 15:19:59,426 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: ESTADRES
+2025-08-05 15:19:59,776 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: CLIATEN
+2025-08-05 15:19:59,914 - flag1.src.data_processing - INFO - Corrected categorical column to handle NaN as string: pN
+2025-08-05 15:19:59,915 - flag1.src.pipeline - INFO - ✓ Data loaded and preprocessed successfully. Shape: (2876497, 28)
+2025-08-05 15:19:59,915 - flag1.src.pipeline - INFO -   Features: 27 total, 19 categorical
+2025-08-05 15:20:06,700 - flag1.src.pipeline - DEBUG - DataFrame memory usage: 2815.27 MB
+2025-08-05 15:20:06,701 - flag1.src.pipeline - INFO - 
+==================================================
+2025-08-05 15:20:06,701 - flag1.src.pipeline - INFO - STEP 2/4: RUNNING IMPUTATION
+2025-08-05 15:20:06,701 - flag1.src.pipeline - INFO - ==================================================
+2025-08-05 15:20:06,701 - flag1.src.imputation - INFO - Starting imputation loop with 100 iterations.
+2025-08-05 15:20:06,701 - flag1.src.imputation - INFO - Starting imputation 1/100
+2025-08-05 15:20:11,611 - flag1.src.imputation - INFO - [Binary Model] Training with 15 features: ['CNES', 'MUUH', 'LOCTUDET', 'LOCTUPRI', 'UFUH', 'PRITRATH', 'CLITRAT', 'ESTADRES', 'CLIATEN', 'DTTRIAGE', 'ANTRI', 'DATAPRICON', 'obitcons', 'Quimioterapia_TRAT', 'DATAINITRT']
+2025-08-05 15:20:11,611 - flag1.src.imputation - DEBUG - Excluded staging variables: ['TNM', 'OUTROESTA', 'T', 'N', 'M', 'pT', 'pN', 'pM', 'PTNM', 'ESTDFIMT', 'estadiamento_ordinal', 'flag_nao_estadiavel', 'flag_nao_estadiavel']
+2025-08-05 15:20:11,611 - flag1.src.imputation - DEBUG - Original cat_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 22]
+2025-08-05 15:20:11,611 - flag1.src.imputation - DEBUG - Filtered cat_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+2025-08-05 15:20:12,525 - flag1.src.imputation - DEBUG - Using scale_pos_weight=3.52 for binary classification
+2025-08-05 15:22:08,233 - flag1.src.imputation - DEBUG - Applied temperature scaling: 0.5
+2025-08-05 15:22:08,233 - flag1.src.imputation - DEBUG - Model type: binary
+2025-08-05 15:22:08,233 - flag1.src.imputation - DEBUG - Model classes: [0 1]
+2025-08-05 15:22:08,257 - flag1.src.imputation - DEBUG - Unique y_train values: [0 1]
+2025-08-05 15:22:08,259 - flag1.src.imputation - DEBUG - Unique y_val values: [0 1]
+2025-08-05 15:22:08,272 - flag1.src.imputation - DEBUG - Class distribution - Train: {0: np.int64(1135688), 1: np.int64(322364)}
+2025-08-05 15:22:08,275 - flag1.src.imputation - DEBUG - Class distribution - Val: {0: np.int64(283922), 1: np.int64(80591)}
+2025-08-05 15:22:08,276 - flag1.src.imputation - DEBUG - Top 10 important features for binary model:
+2025-08-05 15:22:08,297 - flag1.src.imputation - DEBUG -        feature  importance
+0         CNES   28.091491
+3     LOCTUPRI   16.499266
+11  DATAPRICON   10.773199
+2     LOCTUDET    9.724399
+6      CLITRAT    4.480337
+5     PRITRATH    4.367894
+10       ANTRI    4.362587
+8      CLIATEN    4.282488
+9     DTTRIAGE    3.761599
+1         MUUH    3.749124
+2025-08-05 15:22:09,846 - flag1.src.imputation - INFO - Binary model - Iter 1 - Val LogLoss: 0.2032 - Accuracy: 0.9364 - Classes: [0 1]
+2025-08-05 15:22:09,850 - flag1.src.imputation - DEBUG - Top 10 important features:
+       feature  importance
+0         CNES   28.091491
+3     LOCTUPRI   16.499266
+11  DATAPRICON   10.773199
+2     LOCTUDET    9.724399
+6      CLITRAT    4.480337
+5     PRITRATH    4.367894
+10       ANTRI    4.362587
+8      CLIATEN    4.282488
+9     DTTRIAGE    3.761599
+1         MUUH    3.749124
+2025-08-05 15:22:10,926 - root - DEBUG - Processed 50000/1053932 samples (4.7%)
+2025-08-05 15:22:13,948 - root - DEBUG - Processed 550000/1053932 samples (52.2%)
+2025-08-05 15:22:16,985 - root - DEBUG - Processed 1050000/1053932 samples (99.6%)
+2025-08-05 15:22:17,432 - flag1.src.imputation - INFO - Imputed 1053932 missing flags: 39.0% as 'não estadiável' (1), 61.0% as 'estadiável' (0)
+2025-08-05 15:22:19,245 - flag1.src.imputation - INFO - [Ordinal Model] Training with 25 features.
+2025-08-05 15:22:19,245 - flag1.src.imputation - DEBUG - Features used: ['TNM', 'CNES', 'T', 'MUUH', 'LOCTUDET', 'M', 'LOCTUPRI', 'PTNM', 'UFUH', 'PRITRATH', 'N', 'pT', 'pM', 'OUTROESTA', 'CLITRAT', 'ESTDFIMT', 'ESTADRES', 'CLIATEN', 'DTTRIAGE', 'ANTRI', 'DATAPRICON', 'obitcons', 'pN', 'Quimioterapia_TRAT', 'DATAINITRT']
+2025-08-05 15:22:19,245 - flag1.src.imputation - DEBUG - Excluded variables: ['ESTADIAM', 'estadiamento_ordinal', 'flag_nao_estadiavel']
+2025-08-05 15:22:26,026 - flag1.src.imputation - DEBUG - Training ordinal model with 1121254 samples. Class distribution:
+estadiamento_ordinal
+0     50784
+1    237868
+2    295889
+3    281098
+4    255615
+Name: count, dtype: int64
+2025-08-05 15:22:26,035 - flag1.src.imputation - DEBUG - Using class weights: {0: 4.415776622558286, 1: 0.9427531235811458, 2: 0.7578882621523612, 3: 0.7977673266974508, 4: 0.877299063044031}
+2025-08-05 15:22:53,096 - flag1.src.imputation - DEBUG - Applied temperature scaling: 0.5
+2025-08-05 15:22:53,096 - flag1.src.imputation - DEBUG - Model type: ordinal
+2025-08-05 15:22:53,096 - flag1.src.imputation - DEBUG - Model classes: [0 1 2 3 4]
+2025-08-05 15:22:53,099 - flag1.src.imputation - DEBUG - Unique y_train values: [0 1 2 3 4]
+2025-08-05 15:22:53,100 - flag1.src.imputation - DEBUG - Unique y_val values: [0 1 2 3 4]
+2025-08-05 15:22:53,103 - flag1.src.imputation - DEBUG - Class distribution - Train: {2: np.int64(236711), 3: np.int64(224878), 4: np.int64(204492), 1: np.int64(190295), 0: np.int64(40627)}
+2025-08-05 15:22:53,105 - flag1.src.imputation - DEBUG - Class distribution - Val: {2: np.int64(59178), 3: np.int64(56220), 4: np.int64(51123), 1: np.int64(47573), 0: np.int64(10157)}
+2025-08-05 15:22:53,105 - flag1.src.imputation - DEBUG - Top 10 important features for ordinal model:
+2025-08-05 15:22:53,106 - flag1.src.imputation - DEBUG -      feature  importance
+0        TNM   18.812924
+2          T   17.033421
+4   LOCTUDET   11.996211
+5          M    8.891082
+11        pT    6.277587
+6   LOCTUPRI    5.215395
+1       CNES    4.724981
+10         N    3.665972
+15  ESTDFIMT    3.572129
+7       PTNM    2.799146
+2025-08-05 15:22:53,973 - flag1.src.imputation - INFO - Ordinal model - Iter 1 - Val LogLoss: 0.5070 - Accuracy: 0.8475 - Classes: [0 1 2 3 4]
+2025-08-05 15:22:53,976 - flag1.src.imputation - DEBUG - Top 10 important features:
+     feature  importance
+0        TNM   18.812924
+2          T   17.033421
+4   LOCTUDET   11.996211
+5          M    8.891082
+11        pT    6.277587
+6   LOCTUPRI    5.215395
+1       CNES    4.724981
+10         N    3.665972
+15  ESTDFIMT    3.572129
+7       PTNM    2.799146
+2025-08-05 15:22:55,163 - root - DEBUG - Processed 50000/642683 samples (7.8%)
+2025-08-05 15:22:58,409 - root - DEBUG - Processed 550000/642683 samples (85.6%)
+2025-08-05 15:23:15,809 - flag1.src.imputation - INFO - Imputed 642683 MAR values.
+2025-08-05 15:23:26,473 - flag1.src.imputation - INFO - Imputed 642683 values for MNAR scenario 'mnar_adv'.
+2025-08-05 15:23:37,272 - flag1.src.imputation - INFO - Imputed 642683 values for MNAR scenario 'mnar_s4'.
+2025-08-05 15:23:38,867 - flag1.src.imputation - INFO - Reconstructed 'ESTADIAM' column from imputed values.
+2025-08-05 15:23:38,875 - flag1.src.imputation - DEBUG - Final ESTADIAM distribution:
+ESTADIAM
+88    813277
+4     583342
+2     486167
+3     481374
+1     421720
+0      90617
+99         0
+Name: count, dtype: int64
+2025-08-05 15:23:40,119 - flag1.src.imputation - INFO - Reconstructed 'ESTADIAM' column from imputed values.
+2025-08-05 15:23:40,128 - flag1.src.imputation - DEBUG - Final ESTADIAM distribution:
+ESTADIAM
+88    813277
+4     595820
+3     499968
+2     464366
+1     410380
+0      92686
+99         0
+Name: count, dtype: int64
+2025-08-05 15:23:41,382 - flag1.src.imputation - INFO - Reconstructed 'ESTADIAM' column from imputed values.
+2025-08-05 15:23:41,390 - flag1.src.imputation - DEBUG - Final ESTADIAM distribution:
+ESTADIAM
+88    813277
+4     704180
+2     450432
+3     429380
+1     389333
+0      89895
+99         0
+Name: count, dtype: int64
+2025-08-05 15:23:42,168 - flag1.src.imputation - INFO - Completed imputation 1/100 in 215.47 seconds
+2025-08-05 15:23:42,169 - flag1.src.imputation - INFO - Estimated time remaining: 355.5 minutes
+2025-08-05 15:23:42,169 - root - DEBUG - Imputation 1 completed in 215.47s
+2025-08-05 15:23:42,169 - flag1.src.imputation - INFO - Starting imputation 2/100
+2025-08-05 15:23:46,922 - flag1.src.imputation - INFO - [Binary Model] Training with 15 features: ['CNES', 'MUUH', 'LOCTUDET', 'LOCTUPRI', 'UFUH', 'PRITRATH', 'CLITRAT', 'ESTADRES', 'CLIATEN', 'DTTRIAGE', 'ANTRI', 'DATAPRICON', 'obitcons', 'Quimioterapia_TRAT', 'DATAINITRT']
+2025-08-05 15:23:46,923 - flag1.src.imputation - DEBUG - Excluded staging variables: ['TNM', 'OUTROESTA', 'T', 'N', 'M', 'pT', 'pN', 'pM', 'PTNM', 'ESTDFIMT', 'estadiamento_ordinal', 'flag_nao_estadiavel', 'flag_nao_estadiavel']
+2025-08-05 15:23:46,923 - flag1.src.imputation - DEBUG - Original cat_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 22]
+2025-08-05 15:23:46,923 - flag1.src.imputation - DEBUG - Filtered cat_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+2025-08-05 15:23:47,804 - flag1.src.imputation - DEBUG - Using scale_pos_weight=3.54 for binary classification
+2025-08-05 15:25:42,359 - flag1.src.imputation - DEBUG - Applied temperature scaling: 0.5
+2025-08-05 15:25:42,359 - flag1.src.imputation - DEBUG - Model type: binary
+2025-08-05 15:25:42,360 - flag1.src.imputation - DEBUG - Model classes: [0 1]
+2025-08-05 15:25:42,364 - flag1.src.imputation - DEBUG - Unique y_train values: [0 1]
+2025-08-05 15:25:42,365 - flag1.src.imputation - DEBUG - Unique y_val values: [0 1]
+2025-08-05 15:25:42,371 - flag1.src.imputation - DEBUG - Class distribution - Train: {0: np.int64(1136619), 1: np.int64(321433)}
+2025-08-05 15:25:42,373 - flag1.src.imputation - DEBUG - Class distribution - Val: {0: np.int64(284155), 1: np.int64(80358)}
+2025-08-05 15:25:42,374 - flag1.src.imputation - DEBUG - Top 10 important features for binary model:
+2025-08-05 15:25:42,374 - flag1.src.imputation - DEBUG -        feature  importance
+0         CNES   27.751202
+3     LOCTUPRI   16.297633
+11  DATAPRICON   10.534843
+2     LOCTUDET   10.023586
+6      CLITRAT    4.886549
+10       ANTRI    4.877711
+9     DTTRIAGE    4.104154
+8      CLIATEN    4.080612
+5     PRITRATH    4.035105
+1         MUUH    3.407775
+2025-08-05 15:25:43,739 - flag1.src.imputation - INFO - Binary model - Iter 2 - Val LogLoss: 0.2024 - Accuracy: 0.9364 - Classes: [0 1]
+2025-08-05 15:25:43,742 - flag1.src.imputation - DEBUG - Top 10 important features:
+       feature  importance
+0         CNES   27.751202
+3     LOCTUPRI   16.297633
+11  DATAPRICON   10.534843
+2     LOCTUDET   10.023586
+6      CLITRAT    4.886549
+10       ANTRI    4.877711
+9     DTTRIAGE    4.104154
+8      CLIATEN    4.080612
+5     PRITRATH    4.035105
+1         MUUH    3.407775
+2025-08-05 15:25:44,839 - root - DEBUG - Processed 50000/1053932 samples (4.7%)
+2025-08-05 15:25:47,837 - root - DEBUG - Processed 550000/1053932 samples (52.2%)
+2025-08-05 15:25:50,877 - root - DEBUG - Processed 1050000/1053932 samples (99.6%)
+2025-08-05 15:25:51,338 - flag1.src.imputation - INFO - Imputed 1053932 missing flags: 38.9% as 'não estadiável' (1), 61.1% as 'estadiável' (0)
+2025-08-05 15:25:53,155 - flag1.src.imputation - INFO - [Ordinal Model] Training with 25 features.
+2025-08-05 15:25:53,155 - flag1.src.imputation - DEBUG - Features used: ['TNM', 'CNES', 'T', 'MUUH', 'LOCTUDET', 'M', 'LOCTUPRI', 'PTNM', 'UFUH', 'PRITRATH', 'N', 'pT', 'pM', 'OUTROESTA', 'CLITRAT', 'ESTDFIMT', 'ESTADRES', 'CLIATEN', 'DTTRIAGE', 'ANTRI', 'DATAPRICON', 'obitcons', 'pN', 'Quimioterapia_TRAT', 'DATAINITRT']
+2025-08-05 15:25:53,155 - flag1.src.imputation - DEBUG - Excluded variables: ['ESTADIAM', 'estadiamento_ordinal', 'flag_nao_estadiavel']
+2025-08-05 15:25:59,988 - flag1.src.imputation - DEBUG - Training ordinal model with 1121608 samples. Class distribution:
+estadiamento_ordinal
+0     50523
+1    238154
+2    295865
+3    281325
+4    255741
+Name: count, dtype: int64
+2025-08-05 15:25:59,996 - flag1.src.imputation - DEBUG - Using class weights: {0: 4.439989707657898, 1: 0.941918254574771, 2: 0.7581890389197776, 3: 0.7973752777037234, 4: 0.8771436727001146}
+2025-08-05 15:26:26,590 - flag1.src.imputation - DEBUG - Applied temperature scaling: 0.5
+2025-08-05 15:26:26,590 - flag1.src.imputation - DEBUG - Model type: ordinal
+2025-08-05 15:26:26,590 - flag1.src.imputation - DEBUG - Model classes: [0 1 2 3 4]
+2025-08-05 15:26:26,592 - flag1.src.imputation - DEBUG - Unique y_train values: [0 1 2 3 4]
+2025-08-05 15:26:26,593 - flag1.src.imputation - DEBUG - Unique y_val values: [0 1 2 3 4]
+2025-08-05 15:26:26,597 - flag1.src.imputation - DEBUG - Class distribution - Train: {2: np.int64(236692), 3: np.int64(225060), 4: np.int64(204593), 1: np.int64(190523), 0: np.int64(40418)}
+2025-08-05 15:26:26,598 - flag1.src.imputation - DEBUG - Class distribution - Val: {2: np.int64(59173), 3: np.int64(56265), 4: np.int64(51148), 1: np.int64(47631), 0: np.int64(10105)}
+2025-08-05 15:26:26,599 - flag1.src.imputation - DEBUG - Top 10 important features for ordinal model:
+2025-08-05 15:26:26,600 - flag1.src.imputation - DEBUG -      feature  importance
+0        TNM   19.324435
+2          T   17.174312
+4   LOCTUDET   10.258964
+5          M    8.721886
+6   LOCTUPRI    6.362292
+11        pT    6.074163
+1       CNES    4.745056
+10         N    3.722277
+15  ESTDFIMT    3.512308
+3       MUUH    2.906948
+2025-08-05 15:26:27,474 - flag1.src.imputation - INFO - Ordinal model - Iter 2 - Val LogLoss: 0.5057 - Accuracy: 0.8483 - Classes: [0 1 2 3 4]
+2025-08-05 15:26:27,477 - flag1.src.imputation - DEBUG - Top 10 important features:
+     feature  importance
+0        TNM   19.324435
+2          T   17.174312
+4   LOCTUDET   10.258964
+5          M    8.721886
+6   LOCTUPRI    6.362292
+11        pT    6.074163
+1       CNES    4.745056
+10         N    3.722277
+15  ESTDFIMT    3.512308
+3       MUUH    2.906948
+2025-08-05 15:26:28,692 - root - DEBUG - Processed 50000/644378 samples (7.8%)
+2025-08-05 15:26:32,066 - root - DEBUG - Processed 550000/644378 samples (85.4%)
