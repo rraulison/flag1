@@ -65,8 +65,15 @@ class PooledMetrics:
         lambda_hat = (B + B/n_imps) / (T + 1e-10)  # Fraction of missing information
         v_old = (n_imps - 1) / (lambda_hat**2 + 1e-10)  # Old degrees of freedom
         v_obs = (1 - lambda_hat) * (total_n - 1)  # Observed data degrees of freedom
-        v_com = v_obs + v_old
-        df = v_com * (1 + 1/v_old)**2  # Complete degrees of freedom
+
+        # Corrected degrees of freedom (df) calculation (Barnard & Rubin, 1999)
+        # The previous formula for combining v_obs and v_old was incorrect.
+        # The correct method is to use the harmonic mean.
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df = 1 / (1 / v_old + 1 / v_obs)
+
+        # Handle cases where v_old or v_obs might be infinite, leading to df being NaN
+        df = np.nan_to_num(df, nan=v_old)
         
         # Calculate confidence intervals with proper t-distribution
         if SCIPY_AVAILABLE:

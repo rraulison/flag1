@@ -801,8 +801,10 @@ class Analysis:
             final_results: DataFrame com os resultados finais formatados
             classes_: Lista de classes do alvo
         """
-        # Extrai as pontuações de desempenho do dicionário de desempenho
-        model_performance_scores = model_performance.get('ordinal', [])
+        # Extrai as pontuações de desempenho para ambos os modelos
+        binary_scores = pd.Series(model_performance.get('binary', [])).dropna()
+        ordinal_scores = pd.Series(model_performance.get('ordinal', [])).dropna()
+
         df_filt = df_original  # Mantido para compatibilidade com o código existente
         df_to_imp = df_original[~df_original.index.isin(df_known.index)]  # Dados para imputação
         
@@ -820,7 +822,15 @@ class Analysis:
         Generates the final executive summary and exports all results.
         """
         logger.info("Generating executive summary and exporting results...")
-        perf_series = pd.Series(model_performance_scores).dropna()
+
+        # Build performance string for both models
+        perf_text = ""
+        if not binary_scores.empty:
+            perf_text += f"  • Modelo Binário (flag):     {binary_scores.mean():.4f} (DP: {binary_scores.std():.4f})\n"
+        if not ordinal_scores.empty:
+            perf_text += f"  • Modelo Ordinal (estágio):  {ordinal_scores.mean():.4f} (DP: {ordinal_scores.std():.4f})"
+        if not perf_text:
+            perf_text = "  • Nenhuma métrica de performance disponível."
 
         summary_text = f'''
 ================================================================================
@@ -840,7 +850,7 @@ METODOLOGIA REVISADA:
 
 RESULTADOS PRINCIPAIS (Distribuição Original vs Imputada MAR):
 '''
-        if mar_key and mar_key in results_summary and 'Original' in results_summary:
+        if mar_key and mar_key in results_summary and 'Original (Conhecido)' in results_summary:
             mar_results = results_summary[mar_key]
             original_props = results_summary['Original (Conhecido)']
             
@@ -868,7 +878,8 @@ RESULTADOS PRINCIPAIS (Distribuição Original vs Imputada MAR):
 
         summary_text += f'''
 QUALIDADE E DIAGNÓSTICOS:
-  • Performance Média dos Modelos (LogLoss): {perf_series.mean():.4f} (DP: {perf_series.std():.4f})
+  • Performance Média dos Modelos (LogLoss):
+{perf_text}
   • Os modelos de imputação demonstraram boa e estável performance.
 
 ⚠️  INTERVALOS DE CONFIANÇA E SENSIBILIDADE:

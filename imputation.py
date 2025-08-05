@@ -288,17 +288,17 @@ class ImputationEngine:
                             index=model_feature_names
                         ).sort_values(ascending=False)
                     else:
-                        # Fallback to provided feature_cols, but ensure lengths match
-                        if len(model.feature_importances_) == len(feature_cols):
+                        # Fallback to features_to_use, ensuring lengths match
+                        if len(model.feature_importances_) == len(features_to_use):
                             feature_importance = pd.Series(
                                 model.feature_importances_,
-                                index=feature_cols
+                                index=features_to_use
                             ).sort_values(ascending=False)
                         else:
-                            # If lengths still don't match, use numeric indices
+                            # If lengths still don't match, use numeric indices as a last resort
                             logger.warning(
                                 f"Feature importance length ({len(model.feature_importances_)}) "
-                                f"does not match feature columns length ({len(feature_cols)}). "
+                                f"does not match feature columns length ({len(features_to_use)}). "
                                 "Using numeric indices."
                             )
                             feature_importance = pd.Series(
