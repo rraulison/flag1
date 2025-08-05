@@ -1,9 +1,10 @@
 # this file handles the analysis of imputation results - analysis.py
+import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Tuple
 from pathlib import Path
 
 from . import utils
@@ -19,9 +20,14 @@ class Analysis:
         self.config = config
         self.output_prefix = output_prefix or config.get_output_prefix()
 
-    def analyze_results(self, scenario_proportions: Dict, imputed_dataset: Union[pd.DataFrame, Dict[str, pd.DataFrame]], 
-                            original_dataset: pd.DataFrame, model_performance: Dict, 
-                            model_artifacts: Dict) -> tuple:
+    def analyze_results(
+        self, 
+        scenario_proportions: Dict[str, Dict[str, float]], 
+        imputed_dataset: Union[pd.DataFrame, Dict[str, pd.DataFrame]], 
+        original_dataset: pd.DataFrame, 
+        model_performance: Dict[str, List[Dict[str, float]]], 
+        model_artifacts: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, Dict[str, float]], List[str], Dict[str, float]]:
         """
         Analyzes imputation results and returns a summary.
         
@@ -39,15 +45,43 @@ class Analysis:
         # Get target variable from config
         target_var = self.config.TARGET_VARIABLE
         
-        # Handle both dict and DataFrame inputs
+        # Standardize input types
+        if not isinstance(original_dataset, pd.DataFrame):
+            raise TypeError(f"original_dataset must be a pandas DataFrame, got {type(original_dataset).__name__}")
+            
+        if not isinstance(model_performance, dict):
+            raise TypeError(f"model_performance must be a dictionary, got {type(model_performance).__name__}")
+            
+        if not isinstance(model_artifacts, dict):
+            raise TypeError(f"model_artifacts must be a dictionary, got {type(model_artifacts).__name__}")
+            
+        # Handle both dict and DataFrame inputs for imputed_dataset
+        main_imputed_df: pd.DataFrame
         if isinstance(imputed_dataset, dict):
+            if not imputed_dataset:
+                raise ValueError("imputed_dataset dictionary is empty")
+                
             # Use MAR scenario as the main dataset for analysis
             main_imputed_df = imputed_dataset.get('mar')
             if main_imputed_df is None:
-                raise ValueError("MAR scenario not found in imputed datasets")
-        else:
-            # Backward compatibility
+                available_scenarios = list(imputed_dataset.keys())
+                raise ValueError(
+                    f"MAR scenario not found in imputed datasets. "
+                    f"Available scenarios: {', '.join(available_scenarios)}"
+                )
+                
+            if not isinstance(main_imputed_df, pd.DataFrame):
+                raise TypeError(
+                    f"MAR scenario data must be a pandas DataFrame, "
+                    f"got {type(main_imputed_df).__name__}"
+                )
+        elif isinstance(imputed_dataset, pd.DataFrame):
             main_imputed_df = imputed_dataset
+        else:
+            raise TypeError(
+                f"imputed_dataset must be a pandas DataFrame or a dictionary of DataFrames, "
+                f"got {type(imputed_dataset).__name__}"
+            )
         
         # Use the original dataset for calculating original proportions
         original_dataset = original_dataset.copy()
@@ -67,15 +101,40 @@ class Analysis:
             if target_var not in original_dataset.columns:
                 raise ValueError(f"Target variable '{target_var}' not found in the original dataset")
                 
-            # Convert target to string and handle missing values
-            main_imputed_df[target_var] = main_imputed_df[target_var].astype(str)
+            # Convert target to string and handle missing values consistently
+            main_imputed_df[target_var] = (
+                main_imputed_df[target_var]
+                .astype(str)
+                .replace({'nan': None, 'None': None, '': None})
+            )
             
             # Get classes from config or infer from data (excluding missing values)
-            if hasattr(self.config, 'CLASSES'):
+            classes_: List[str]
+            if hasattr(self.config, 'CLASSES') and self.config.CLASSES:
                 classes_ = [str(c) for c in self.config.CLASSES]
+                logger.debug(f"Using classes from config: {classes_}")
+                
+                # Warn if there are values in the data that aren't in the config classes
+                unique_values = set(main_imputed_df[target_var].dropna().unique())
+                unknown_values = unique_values - set(classes_ + ['99'])  # '99' is our missing value code
+                if unknown_values:
+                    logger.warning(
+                        f"Found {len(unknown_values)} values in data not in config.CLASSES: "
+                        f"{', '.join(sorted(unknown_values))}"
+                    )
             else:
-                classes_ = sorted([str(c) for c in main_imputed_df[target_var].unique() 
-                                if str(c) != '99' and pd.notna(c)])
+                # Infer classes from data (excluding missing values and '99')
+                classes_ = sorted([
+                    str(c) for c in main_imputed_df[target_var].unique() 
+                    if str(c) not in ['99', 'nan', 'None', ''] and pd.notna(c)
+                ])
+                logger.debug(f"Inferred classes from data: {classes_}")
+                
+                if not classes_:
+                    raise ValueError(
+                        "No valid classes found in the target variable. "
+                        "Check your data or provide CLASSES in the config."
+                    )
             
             if not classes_:
                 raise ValueError("No valid classes found in the target variable")
@@ -444,30 +503,38 @@ class Analysis:
             
             covered = []
             ci_widths = []
-            
+            valid_indices = []  # Track which indices we actually process
+        
             for i, cls in enumerate(classes_):
                 if i >= len(ci_lower) or i >= len(ci_upper):
                     continue
-                    
-                original_prop = original_props[cls]
-                lower = ci_lower[i]
-                upper = ci_upper[i]
                 
-                if pd.isna(lower) or pd.isna(upper):
+                try:
+                    original_prop = original_props[cls]
+                    lower = ci_lower[i]
+                    upper = ci_upper[i]
+                    
+                    if pd.isna(lower) or pd.isna(upper):
+                        continue
+                        
+                    is_covered = lower <= original_prop <= upper
+                    covered.append(is_covered)
+                    ci_widths.append(upper - lower)
+                    valid_indices.append(i)  # Track the original index that corresponds to this coverage
+                except (IndexError, KeyError) as e:
+                    logger.warning(f"Skipping class {cls} due to error: {str(e)}")
                     continue
-                    
-                is_covered = lower <= original_prop <= upper
-                covered.append(is_covered)
-                ci_widths.append(upper - lower)
-            
-            if not covered:  # In case all values were NaN
+        
+            if not covered:  # In case all values were NaN or had errors
+                logger.warning(f"No valid confidence intervals for scenario {scenario_name}")
                 continue
-                
+            
             coverage_rate = np.mean(covered)
             avg_width = np.mean(ci_widths) if ci_widths else np.nan
-            
-            covered_classes = [str(cls) for i, cls in enumerate(classes_) if covered[i]]
-            not_covered = [str(classes_[i]) for i, c in enumerate(covered) if not c]
+        
+            # Use the tracked valid indices to get the correct class names
+            covered_classes = [str(classes_[i]) for i, is_covered in zip(valid_indices, covered) if is_covered]
+            not_covered = [str(classes_[i]) for i, is_covered in zip(valid_indices, covered) if not is_covered]
             
             logger.info(f"{scenario_name:<35} {coverage_rate:>5.0%} {avg_width:>15.4f} {rel_var_inc:>12.1f}x {frac_missing:>15.1%} {','.join(covered_classes) if len(covered_classes) <= 3 else f'{len(covered_classes)} classes'}")
             
@@ -754,8 +821,11 @@ class Analysis:
             ax = axes[i]
             for scenario_key, props_list in scenario_proportions.items():
                 if props_list and scenario_key in scenario_names:
-                    values = [props[cls] for props in props_list]
-                    ax.plot(values, label=scenario_names[scenario_key], alpha=0.8, linewidth=1.5)
+                    # Convert list of dicts to DataFrame for easier manipulation
+                    df_scenario = pd.DataFrame(props_list)
+                    if str(i) in df_scenario.columns:
+                        ax.plot(df_scenario[str(i)], label=scenario_names[scenario_key])
+            
             ax.set_title(f'Estágio {cls}')
             ax.set_xlabel('Iteração')
             ax.set_ylabel('Proporção')
@@ -767,44 +837,69 @@ class Analysis:
         fig.legend(list(scenario_names.values()), loc='upper center', bbox_to_anchor=(0.5, 0.05), ncol=4)
         plt.suptitle('Diagnóstico de Convergência - Trace Plots', fontsize=16, fontweight='bold')
         plt.tight_layout(rect=[0, 0.08, 1, 0.96])
-        plt.savefig(f"{self.output_prefix}_convergence_trace_plots.png")
-        plt.close()
-        logger.info(f"Saved convergence trace plots to {self.output_prefix}_convergence_trace_plots.png")
-
+        
+        # Ensure output directory exists
+        output_dir = self.output_prefix.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save the figure
+        output_file = f"{self.output_prefix}_convergence_trace_plots.png"
+        try:
+            plt.savefig(output_file)
+            plt.close()
+            logger.info(f"Saved convergence trace plots to {output_file}")
+        except Exception as e:
+            logger.error(f"Failed to save convergence trace plots: {e}")
+            plt.close()
+    
     def export_imputed_datasets(self, imputed_datasets: Dict[str, pd.DataFrame]):
-        """Exports the final imputed datasets for each scenario."""
+        """
+        Exports the final imputed datasets for each scenario.
+        
+        Args:
+            imputed_datasets: Dictionary mapping scenario names to DataFrames
+        """
         logger.info("Exporting imputed datasets...")
+        
+        # Ensure output directory exists
+        output_dir = self.output_prefix.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         for scenario, df in imputed_datasets.items():
             df_export = df.copy()
             df_export['MI_ID'] = self.config.N_IMPUTATIONS
             
-            output_file = self.output_prefix.parent / f"{self.output_prefix.name}_imputed_dataset_{scenario}.csv"
+            output_file = output_dir / f"{self.output_prefix.name}_imputed_dataset_{scenario}.csv"
             try:
                 df_export.to_csv(output_file, index=False)
                 logger.info(f"   ✓ Exported {scenario} dataset to {output_file}")
             except Exception as e:
                 logger.error(f"   ❌ Failed to export {scenario} dataset: {e}")
-
-    def generate_and_export_report(self, df_original: pd.DataFrame, df_known: pd.DataFrame, 
-                                   df_imputed: pd.DataFrame, results_summary: Dict, 
-                                   model_performance: Dict, final_results: pd.DataFrame, 
-                                   classes_: List[str]):
+                logger.error(f"   Output directory: {output_dir.absolute()}")
+                logger.error(f"   Directory exists: {output_dir.exists()}")
+                logger.error(f"   Is directory: {output_dir.is_dir() if output_dir.exists() else 'N/A'}")
+                logger.error(f"   Is writable: {os.access(str(output_dir), os.W_OK) if output_dir.exists() else 'N/A'}")
+    
+    def generate_executive_summary(self, df_original: pd.DataFrame, df_known: pd.DataFrame, 
+                                 results_summary: Dict, model_performance: Dict, 
+                                 classes_: List[str]) -> str:
         """
-        Gera o relatório executivo final e exporta todos os resultados.
+        Generates an executive summary of the imputation results.
         
         Args:
-            df_original: DataFrame original com todos os dados (incluindo valores ausentes)
-            df_known: DataFrame contendo apenas os dados conhecidos (não imputados)
-            df_imputed: DataFrame com os dados imputados
-            results_summary: Dicionário com os resultados resumidos
-            model_performance: Dicionário com as métricas de desempenho dos modelos
-            final_results: DataFrame com os resultados finais formatados
-            classes_: Lista de classes do alvo
+            df_original: Original DataFrame with all data
+            df_known: DataFrame containing only known (non-imputed) data
+            results_summary: Dictionary with summary results
+            model_performance: Dictionary with model performance metrics
+            classes_: List of class names
+            
+        Returns:
+            str: Formatted executive summary text
         """
-        # Extrai as pontuações de desempenho do dicionário de desempenho
+        # Extract performance scores from the performance dictionary
         model_performance_scores = model_performance.get('ordinal', [])
-        df_filt = df_original  # Mantido para compatibilidade com o código existente
-        df_to_imp = df_original[~df_original.index.isin(df_known.index)]  # Dados para imputação
+        df_filt = df_original  # Kept for compatibility with existing code
+        df_to_imp = df_original[~df_original.index.isin(df_known.index)]  # Data to impute
         
         # Debug: Log the available keys in results_summary
         logger.debug(f"Available result keys: {list(results_summary.keys())}")
@@ -816,12 +911,9 @@ class Analysis:
             mar_key = list(results_summary.keys())[0]  # Fallback to first key if no MAR found
             logger.warning(f"No explicit MAR scenario found, using first available: {mar_key}")
         
-        """
-        Generates the final executive summary and exports all results.
-        """
-        logger.info("Generating executive summary and exporting results...")
+        logger.info("Generating executive summary...")
         perf_series = pd.Series(model_performance_scores).dropna()
-
+        
         summary_text = f'''
 ================================================================================
 RESUMO EXECUTIVO - IMPUTAÇÃO MÚLTIPLA DE ESTADIAMENTO (REVISADO)
@@ -865,8 +957,10 @@ RESULTADOS PRINCIPAIS (Distribuição Original vs Imputada MAR):
                 except Exception as e:
                     logger.warning(f"Error processing class {cls}: {e}")
                     continue
-
+                    
+        # Add quality and diagnostics section
         summary_text += f'''
+
 QUALIDADE E DIAGNÓSTICOS:
   • Performance Média dos Modelos (LogLoss): {perf_series.mean():.4f} (DP: {perf_series.std():.4f})
   • Os modelos de imputação demonstraram boa e estável performance.
@@ -884,26 +978,6 @@ QUALIDADE E DIAGNÓSTICOS:
       (ou sensibilidade) dos achados a diferentes suposições.
    3. Validar as distribuições imputadas com especialistas da área.
 '''
-        logger.info(summary_text)
-
-        # Exportação
-        logger.info("Exporting results...")
-        try:
-            final_results.to_csv(f"{self.output_prefix}_summary.csv")
-            logger.info(f"   ✓ Summary exported: {self.output_prefix}_summary.csv")
-            
-            with open(f"{self.output_prefix}_report.txt", 'w', encoding='utf-8') as f:
-                f.write(summary_text)
-            logger.info(f"   ✓ Full report: {self.output_prefix}_report.txt")
-            
-            # Export the imputed datasets
-            if isinstance(df_imputed, dict):
-                self.export_imputed_datasets(df_imputed)
-            else:
-                logger.warning(f"Expected df_imputed to be a dict, got {type(df_imputed).__name__}")
-                self.export_imputed_datasets({'mar': df_imputed})
-
-        except Exception as e:
-            logger.error(f"   ❌ Export error: {e}")
-
-        logger.info("REVISED ANALYSIS SUCCESSFULLY COMPLETED!")
+        
+        logger.info("Executive summary generated successfully")
+        return summary_text

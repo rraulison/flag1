@@ -4,8 +4,7 @@ import numpy as np
 import logging
 from typing import Tuple, List
 import warnings
-#import cudf.pandas
-#cudf.pandas.install()
+
 
 logger = logging.getLogger(__name__)
 

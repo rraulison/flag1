@@ -5,25 +5,96 @@ Enhanced configuration with better organization and validation.
 """
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Optional, Any
 import logging
+import platform
+import subprocess
+import sys
 from datetime import datetime
 
+def detect_gpu() -> Dict[str, Any]:
+    """Detect available GPU and return configuration."""
+    gpu_info = {
+        'available': False,
+        'type': None,
+        'count': 0,
+        'devices': []
+    }
+    
+    try:
+        # Try to detect NVIDIA GPUs
+        if platform.system() == 'Windows':
+            try:
+                result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'], 
+                                     capture_output=True, text=True, check=True)
+                if result.returncode == 0:
+                    gpu_info['available'] = True
+                    gpu_info['type'] = 'nvidia'
+                    gpu_info['devices'] = [line.split(',')[0].strip() for line in result.stdout.strip().split('\n')]
+                    gpu_info['count'] = len(gpu_info['devices'])
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
+        else:  # Linux/Unix
+            try:
+                result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'], 
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if result.returncode == 0:
+                    gpu_info['available'] = True
+                    gpu_info['type'] = 'nvidia'
+                    gpu_info['devices'] = [line.split(',')[0].strip() for line in result.stdout.strip().split('\n') if line.strip()]
+                    gpu_info['count'] = len(gpu_info['devices'])
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
+        
+        # If no NVIDIA GPU, check for AMD (ROCm)
+        if not gpu_info['available']:
+            try:
+                result = subprocess.run(['rocm-smi', '--showid'], 
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if result.returncode == 0:
+                    gpu_info['available'] = True
+                    gpu_info['type'] = 'amd'
+                    # Count the number of GPU devices
+                    gpu_info['count'] = len([line for line in result.stdout.split('\n') 
+                                           if 'GPU[' in line and 'GPU ID' not in line])
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
+                
+    except Exception as e:
+        logging.warning(f"Error detecting GPU: {str(e)}")
+        
+    return gpu_info
+
 class Config:
-    """Centralized configuration with validation."""
+    """Centralized configuration with validation and hardware detection."""
     
     # Determine the base directory of the project dynamically
     _BASE_DIR = Path(__file__).parent.parent.resolve()
+    
+    # Detect hardware configuration
+    _GPU_INFO = detect_gpu()
+    
+    # Performance settings based on available hardware
+    USE_GPU: bool = _GPU_INFO['available']
+    DEVICE_TYPE: str = 'gpu' if _GPU_INFO['available'] else 'cpu'
+    N_JOBS: int = -1  # Use all available CPU cores by default
+    
+    # Temperature scaling for probability calibration
+    TEMPERATURE_SCALING: float = 0.5  # Lower values = softer probabilities
 
     # Core Settings
     DEBUG: bool = True
-    N_IMPUTATIONS: int = 5  # Reduced from 100 for testing
+    N_IMPUTATIONS: int = 1  # Reduced from 100 for testing
     CONFIDENCE_LEVEL: float = 0.95
     TARGET_VARIABLE: str = 'ESTADIAM'
     ORDINAL_TARGET_VARIABLE: str = 'estadiamento_ordinal'
     
+    # Class labels for the target variable (ESTADIAM)
+    # These should match the possible values in your target variable
+    CLASSES: List[str] = ['0', '1', '2', '3', '4']  # Possible stages 0-4
+    
     # Performance Settings
-    RECIPIENT_QUERY_BATCH_SIZE: int = 10000  # Reduced batch size for better memory management
+    RECIPIENT_QUERY_BATCH_SIZE: int = 50000  # Reduced batch size for better memory management
     SUBSAMPLE_RATIO: float = 0.8  # Slightly reduced for faster training
     EARLY_STOPPING_ROUNDS: int = 20  # Reduced for faster convergence
     K_PMM_NEIGHBORS: int = 5  # Reduced number of neighbors for faster PMM
@@ -51,46 +122,48 @@ class Config:
     DELTA_RANGE: List[float] = list(np.linspace(1.0, 4.0, 20))
     
     # Binary Classifier Parameters (for 88 classification)
-    BINARY_CLASSIFIER_PARAMS = {
-        "iterations": 2000,
-        "depth": 6,
-        "learning_rate": 0.05,
-        "l2_leaf_reg": 3.0,
-        "random_strength": 0.5,
-        "min_data_in_leaf": 50,
-        "border_count": 128,
-        "grow_policy": "Depthwise",
-        "subsample": 0.8,
-        "loss_function": "Logloss",
-        "eval_metric": "Logloss",
-        "task_type": "GPU",
-        "verbose": False,
-        "allow_writing_files": False,
-        "bootstrap_type": "Bernoulli",
-        # Use all available CPU cores
-        "thread_count": -1
+    BINARY_CLASSIFIER_PARAMS: Dict[str, Any] = {
+        'iterations': 1000,
+        'learning_rate': 0.03,
+        'depth': 6,
+        'l2_leaf_reg': 3,
+        'loss_function': 'Logloss',
+        'eval_metric': 'Logloss',
+        'task_type': 'GPU' if _GPU_INFO['available'] else 'CPU',
+        'devices': '0' if _GPU_INFO['available'] else None,
+        'random_seed': 42,
+        'verbose': 100,
+        'early_stopping_rounds': 50,
+        'bootstrap_type': 'Bernoulli',
+        'subsample': 0.8,
+        'thread_count': -1  # Use all CPU cores
     }
     
+    # Update task type based on hardware
+    if not _GPU_INFO['available']:
+        BINARY_CLASSIFIER_PARAMS.pop('devices', None)  # Remove GPU-specific settings
+    
     # Ordinal Classifier Parameters (for staging classification)
-    ORDINAL_CLASSIFIER_PARAMS = {
-        "iterations": 2000,
-        "depth": 8,
-        "learning_rate": 0.075458,
-        "l2_leaf_reg": 18.123750,
-        "random_strength": 0.581402,
-        "min_data_in_leaf": 97,
-        "border_count": 84,
-        "grow_policy": "Depthwise",
-        "subsample": 0.654557,
-        "loss_function": "MultiClass",
-        "eval_metric": "MultiClass",
-        "task_type": "GPU",
-        "verbose": False,
-        "allow_writing_files": False,
-        "bootstrap_type": "Bernoulli",
-        # Use all available CPU cores
-        "thread_count": -1
+    ORDINAL_CLASSIFIER_PARAMS: Dict[str, Any] = {
+        'iterations': 1000,
+        'learning_rate': 0.03,
+        'depth': 6,
+        'l2_leaf_reg': 3,
+        'loss_function': 'MultiClass',
+        'eval_metric': 'MultiClass',
+        'task_type': 'GPU' if _GPU_INFO['available'] else 'CPU',
+        'devices': '0' if _GPU_INFO['available'] else None,
+        'random_seed': 42,
+        'verbose': 100,
+        'early_stopping_rounds': 50,
+        'bootstrap_type': 'Bernoulli',
+        'subsample': 0.8,
+        'thread_count': -1  # Use all CPU cores
     }
+    
+    # Update task type based on hardware
+    if not _GPU_INFO['available']:
+        ORDINAL_CLASSIFIER_PARAMS.pop('devices', None)  # Remove GPU-specific settings
 
     @classmethod
     def get_output_prefix(cls) -> Path:
@@ -100,29 +173,69 @@ class Config:
     
     @classmethod
     def validate(cls) -> None:
-        """Validate configuration parameters and paths."""
-        # Basic parameter validation
-        assert 0 < cls.CONFIDENCE_LEVEL < 1, "Confidence level must be between 0 and 1"
-        assert cls.N_IMPUTATIONS > 0, "Number of imputations must be positive"
-        assert 0 < cls.SUBSAMPLE_RATIO <= 1, "Subsample ratio must be between 0 and 1"
-        assert cls.K_PMM_NEIGHBORS > 0, "K neighbors must be positive"
-        assert cls.RECIPIENT_QUERY_BATCH_SIZE > 0, "Batch size must be positive"
+        """Validate configuration settings."""
+        if not 0 < cls.CONFIDENCE_LEVEL < 1:
+            raise ValueError("CONFIDENCE_LEVEL must be between 0 and 1")
+            
+        if cls.N_IMPUTATIONS < 1:
+            raise ValueError("N_IMPUTATIONS must be at least 1")
+            
+        # Validate CLASSES configuration
+        if not hasattr(cls, 'CLASSES') or not cls.CLASSES:
+            raise ValueError("CLASSES must be defined with at least one class")
+            
+        if not all(isinstance(class_name, str) for class_name in cls.CLASSES):
+            raise ValueError("All elements in CLASSES must be strings")
+            
+        if not 0 < cls.SUBSAMPLE_RATIO <= 1:
+            raise ValueError("SUBSAMPLE_RATIO must be between 0 and 1")
+            
+        if cls.K_PMM_NEIGHBORS < 1:
+            raise ValueError("K_PMM_NEIGHBORS must be at least 1")
+            
+        if cls.RECIPIENT_QUERY_BATCH_SIZE < 1:
+            raise ValueError("RECIPIENT_QUERY_BATCH_SIZE must be at least 1")
+            
+        # Validate hardware configuration
+        if not isinstance(cls.USE_GPU, bool):
+            raise ValueError("USE_GPU must be a boolean")
+            
+        if cls.DEVICE_TYPE not in ['cpu', 'gpu']:
+            raise ValueError("DEVICE_TYPE must be either 'cpu' or 'gpu'")
+            
+        if cls.N_JOBS == 0 or cls.N_JOBS < -1:
+            raise ValueError("N_JOBS must be -1 (all cores) or a positive integer")
+            
+        # Validate temperature scaling
+        if not 0.1 <= cls.TEMPERATURE_SCALING <= 5.0:
+            logging.warning(f"TEMPERATURE_SCALING ({cls.TEMPERATURE_SCALING}) is outside recommended range [0.1, 5.0]")
         
         # Validate classifier parameters
-        for param_dict in [cls.BINARY_CLASSIFIER_PARAMS, cls.ORDINAL_CLASSIFIER_PARAMS]:
-            assert param_dict.get('iterations', 0) > 0, "Iterations must be positive"
-            assert 0 < param_dict.get('learning_rate', 0.1) <= 1, "Learning rate must be in (0, 1]"
-            assert param_dict.get('depth', 0) > 0, "Depth must be positive"
-
-        
-        # Ensure required directories exist
-        required_dirs = [cls.OUTPUT_DIR]
-        for dir_path in required_dirs:
-            try:
-                dir_path.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                raise RuntimeError(f"Failed to create directory {dir_path}: {e}")
-        
+        for model_type, param_dict in [
+            ('binary', cls.BINARY_CLASSIFIER_PARAMS),
+            ('ordinal', cls.ORDINAL_CLASSIFIER_PARAMS)
+        ]:
+            if not isinstance(param_dict, dict):
+                raise ValueError(f"{model_type.upper()}_CLASSIFIER_PARAMS must be a dictionary")
+                
+            if param_dict.get('iterations', 0) < 1:
+                raise ValueError(f"{model_type} classifier: iterations must be at least 1")
+                
+            if not 0 < param_dict.get('learning_rate', 0.1) <= 1:
+                raise ValueError(f"{model_type} classifier: learning_rate must be in (0, 1]")
+                
+            if param_dict.get('depth', 0) < 1:
+                raise ValueError(f"{model_type} classifier: depth must be at least 1")
+                
+            # Check for GPU-specific settings
+            if cls.USE_GPU:
+                if param_dict.get('task_type') != 'GPU':
+                    logging.warning(f"{model_type} classifier: task_type should be 'GPU' when USE_GPU is True")
+            else:
+                if param_dict.get('devices') is not None:
+                    logging.warning(f"{model_type} classifier: devices should be None when not using GPU")
+            
+        # Validate paths
         # Check for required files
         if not cls.DATA_FILE.exists():
             logging.warning(f"Data file {cls.DATA_FILE} not found")

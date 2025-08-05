@@ -26,7 +26,7 @@ import time
 # Configure logger
 logger = logging.getLogger(__name__)
 
-# Import functions from utils.py
+# Import functions from utils.py using relative import
 from .utils import safe_pmm_imputation, apply_delta_adjustment, predict_proba_in_batches
 from .config import config
 
@@ -459,7 +459,21 @@ class ImputationEngine:
         self, X_train: pd.DataFrame, y_train: pd.Series, 
         cat_idx: List[int], iteration: int, model_type: str
     ) -> Tuple[Any, float]:
-        """Trains a CatBoost model (binary or ordinal) with improved validation."""
+        """Trains a CatBoost model (binary or ordinal) with improved validation.
+        
+        Args:
+            X_train: Training features
+            y_train: Training target values
+            cat_idx: Indices of categorical features
+            iteration: Current imputation iteration (for seeding)
+            model_type: Type of model ('binary' or 'ordinal')
+            
+        Returns:
+            Tuple of (trained_model, validation_logloss)
+            
+        Raises:
+            ValueError: If training data has only one class
+        """
         # Get base parameters
         params = (
             self.config.BINARY_CLASSIFIER_PARAMS if model_type == 'binary' 
@@ -469,19 +483,27 @@ class ImputationEngine:
         if y_train.nunique() < 2:
             raise ValueError(f"Training data for {model_type} model has only one class.")
 
-        # FIXED: Proper class weight handling for both model types
+        # Handle class weights based on model type
+        class_weights = {}
+        class_counts = y_train.value_counts().sort_index()
+        total_samples = len(y_train)
+        
         if model_type == 'binary':
-            # Use CatBoost's auto_class_weights for better balance
-            params['auto_class_weights'] = 'Balanced'
+            # For binary classification, use scale_pos_weight
+            if 0 in class_counts and 1 in class_counts:
+                # Calculate the ratio of negative to positive class
+                scale_pos_weight = class_counts[0] / class_counts[1]
+                params['scale_pos_weight'] = scale_pos_weight
+                logger.debug(f"Using scale_pos_weight={scale_pos_weight:.2f} for binary classification")
         else:
-            # For ordinal, use scale_pos_weight or manual class weights
-            class_counts = y_train.value_counts().sort_index()
-            total_samples = len(y_train)
-            # Calculate inverse frequency weights
-            class_weights = {}
-            for cls in class_counts.index:
-                class_weights[cls] = total_samples / (len(class_counts) * class_counts[cls])
-            params['class_weights'] = class_weights
+            # For multi-class, calculate balanced class weights
+            for cls, count in class_counts.items():
+                # Inverse frequency weighting with smoothing
+                class_weights[cls] = total_samples / (len(class_counts) * count)
+            
+            if class_weights:  # Only set if we have valid weights
+                params['class_weights'] = class_weights
+                logger.debug(f"Using class weights: {class_weights}")
         
         # Split data with stratification to maintain class distribution
         X_train_part, X_val_part, y_train_part, y_val_part = train_test_split(
@@ -516,9 +538,11 @@ class ImputationEngine:
         val_preds = model.predict_proba(X_val_part)
         
         # Apply temperature scaling to soften probabilities
-        temperature = 0.5  # Adjust this value as needed
-        val_preds = np.power(val_preds, 1.0/temperature)
-        val_preds = val_preds / val_preds.sum(axis=1, keepdims=1)
+        temperature = getattr(self.config, 'TEMPERATURE_SCALING', 0.5)
+        if temperature != 1.0:  # Only apply if not 1.0 (no scaling)
+            val_preds = np.power(val_preds, 1.0/temperature)
+            val_preds = val_preds / val_preds.sum(axis=1, keepdims=1)
+            logger.debug(f"Applied temperature scaling: {temperature}")
         
         # Log model and data information
         logger.debug(f"Model type: {model_type}")

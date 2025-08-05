@@ -4,13 +4,31 @@ Enhanced utility functions with better error handling and performance.
 """
 import numpy as np
 import pandas as pd
-from cuml.accel import install
-install()
-import cuml.neighbors
-from typing import List, Optional, Union, Tuple, Dict
+from typing import List, Optional, Union, Tuple, Dict, Any
 import logging
 from contextlib import contextmanager
 import gc
+import warnings
+
+# GPU/CPU handling
+try:
+    from cuml.accel import install
+    install()
+    import cuml.neighbors
+    USE_GPU = True
+except (ImportError, RuntimeError) as e:
+    try:
+        from sklearn.neighbors import NearestNeighbors
+        USE_GPU = False
+        warnings.warn(
+            "cuML not available, falling back to scikit-learn (CPU) for nearest neighbors. "
+            "Performance may be slower. Error: " + str(e)
+        )
+    except ImportError:
+        raise ImportError(
+            "Neither cuML nor scikit-learn is available. "
+            "Please install at least scikit-learn: pip install scikit-learn"
+        )
 
 try:
     from scipy.stats import t
@@ -34,50 +52,47 @@ class PooledMetrics:
     @staticmethod
     def calculate_rubin_metrics(props_array: np.ndarray, total_n: int, conf_level: float) -> Dict:
         """
-        Enhanced Rubin's rules for multiple imputation with better handling of edge cases.
-        
-        Args:
-            props_array: 2D array of shape (n_imputations, n_classes) with proportions
-            total_n: Total number of observations
-            conf_level: Confidence level (e.g., 0.95 for 95% CI)
-            
-        Returns:
-            Dictionary with pooled metrics including means, CIs, and variance components
+        Enhanced Rubin's rules for multiple imputation with corrected degrees of freedom.
         """
         n_imps, n_classes = props_array.shape
         means = np.mean(props_array, axis=0)
-        
-        # Handle single imputation case
+    
         if n_imps == 1:
             return PooledMetrics._single_imputation_metrics(means, total_n, conf_level)
-        
-        # Rubin's rules with better numerical stability
-        # Within-imputation variance (average of individual variances)
+    
+        # Within-imputation variance
         W = np.mean([p * (1 - p) / (total_n - 1 + 1e-10) for p in props_array], axis=0)
-        
-        # Between-imputation variance with Bessel's correction
+    
+        # Between-imputation variance
         B = np.var(props_array, axis=0, ddof=1)
-        
-        # Total variance with finite-population correction (Barnard & Rubin, 1999)
+    
+        # Total variance
         T = W + B * (1 + 1/n_imps)
-        
-        # FIXED: Proper degrees of freedom calculation (Barnard & Rubin, 1999)
-        lambda_hat = (B + B/n_imps) / (T + 1e-10)  # Fraction of missing information
-        v_old = (n_imps - 1) / (lambda_hat**2 + 1e-10)  # Old degrees of freedom
-        v_obs = (1 - lambda_hat) * (total_n - 1)  # Observed data degrees of freedom
-        v_com = v_obs + v_old
-        df = v_com * (1 + 1/v_old)**2  # Complete degrees of freedom
-        
-        # Calculate confidence intervals with proper t-distribution
+    
+        # Fraction of missing information
+        lambda_hat = (B + B/n_imps) / (T + 1e-10)
+    
+        # Old degrees of freedom (Rubin, 1987)
+        v_old = (n_imps - 1) / (lambda_hat**2 + 1e-10)
+    
+        # Observed data degrees of freedom
+        v_obs = (1 - lambda_hat) * (total_n - 1)
+    
+        # CORRECTED: Barnard & Rubin (1999) adjustment using harmonic mean
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df = 1 / (1 / v_old + 1 / v_obs)
+    
+        # Handle edge cases
+        df = np.nan_to_num(df, nan=v_old, posinf=v_old, neginf=v_old)
+        df = np.clip(df, 1, 1e6)  # Ensure reasonable range
+    
+        # Calculate confidence intervals
         if SCIPY_AVAILABLE:
             alpha = 1 - conf_level
-            # Ensure df is finite and positive
-            df = np.nan_to_num(df, nan=1e6, posinf=1e6, neginf=1)
-            df = np.clip(df, 1, 1e6)  # Clip to reasonable range
             t_critical = np.array([t.ppf(1 - alpha/2, df_val) for df_val in df])
         else:
-            t_critical = 1.96  # Fallback to normal approximation
-        
+            t_critical = 1.96
+
         # Calculate margin of error and confidence intervals
         margin = t_critical * np.sqrt(T)
         ci_lower = np.clip(means - margin, 0, 1)
@@ -191,11 +206,14 @@ def safe_pmm_imputation(probs_recipients: np.ndarray, probs_donors: np.ndarray,
                        random_state: Optional[int] = None) -> np.ndarray:
     """
     Enhanced PMM with better error handling, validation, and shape checking.
+    Supports both GPU (cuML) and CPU (scikit-learn) backends.
     
     Args:
         probs_recipients: 2D array of shape (n_recipients, n_classes) with probability scores
         probs_donors: 2D array of shape (n_donors, n_classes) with probability scores
         y_donors: Series or array of shape (n_donors,) with class labels
+        k_neighbors: Number of neighbors to consider (default: 5)
+        random_state: Random seed for reproducibility (default: None)
         k_neighbors: Number of neighbors to consider
         random_state: Random seed for reproducibility
         
@@ -232,15 +250,24 @@ def safe_pmm_imputation(probs_recipients: np.ndarray, probs_donors: np.ndarray,
     k_eff = min(len(probs_donors), k_neighbors)
     
     try:
-        # Initialize and fit nearest neighbors
-        nn = cuml.neighbors.NearestNeighbors(n_neighbors=k_eff, metric='euclidean')
-        nn.fit(probs_donors)
-        
-        # Find nearest neighbors for each recipient
-        distances, neighbor_indices = nn.kneighbors(probs_recipients)
+        if USE_GPU:
+            # GPU-accelerated nearest neighbors with cuML
+            nn = cuml.neighbors.NearestNeighbors(n_neighbors=k_eff, metric='euclidean')
+            nn.fit(probs_donors)
+            distances, neighbor_indices = nn.kneighbors(probs_recipients)
+        else:
+            # CPU fallback with scikit-learn
+            nn = NearestNeighbors(n_neighbors=k_eff, metric='euclidean', n_jobs=-1)
+            nn.fit(probs_donors)
+            distances, neighbor_indices = nn.kneighbors(probs_recipients)
         
         # Randomly select one neighbor for each recipient
         chosen_indices = rng.randint(0, k_eff, size=len(probs_recipients))
+        
+        # Convert to numpy array if using cuML (returns cupy arrays)
+        if hasattr(neighbor_indices, 'get'):  # Check if cupy array
+            neighbor_indices = neighbor_indices.get()
+        
         donor_indices = neighbor_indices[np.arange(len(probs_recipients)), chosen_indices]
         
         # Handle both pandas Series and numpy array cases
@@ -252,15 +279,23 @@ def safe_pmm_imputation(probs_recipients: np.ndarray, probs_donors: np.ndarray,
             return y_donors[donor_indices]
         
     except Exception as e:
-        logging.error(f"PMM imputation failed: {e}")
+        logging.error(f"PMM imputation failed: {e}", exc_info=True)
         logging.error(f"Shapes - probs_recipients: {probs_recipients.shape}, "
                      f"probs_donors: {probs_donors.shape}, y_donors: {len(y_donors)}")
         
         # Fallback to random sampling - handle both cases
-        if hasattr(y_donors, 'values'):
-            return rng.choice(y_donors.values, size=len(probs_recipients))
-        else:
+        try:
+            if hasattr(y_donors, 'values'):
+                return rng.choice(y_donors.values, size=len(probs_recipients))
             return rng.choice(y_donors, size=len(probs_recipients))
+        except Exception as fallback_error:
+            logging.error(f"Fallback sampling also failed: {fallback_error}")
+            # Last resort: return most common class or first class if available
+            if hasattr(y_donors, 'mode') and not y_donors.empty:
+                return np.full(len(probs_recipients), y_donors.mode().iloc[0])
+            elif len(y_donors) > 0:
+                return np.full(len(probs_recipients), y_donors[0] if hasattr(y_donors, '__getitem__') else '0')
+            return np.full(len(probs_recipients), '0')
 
 def apply_delta_adjustment_optimized(probs: np.ndarray, delta: float, target_stages: List[str], 
                                    classes: List[str]) -> np.ndarray:

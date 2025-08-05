@@ -135,9 +135,18 @@ class Pipeline:
             logger.info("STEP 1/4: LOADING AND PREPROCESSING DATA")
             logger.info("="*50)
             
+            # Log initial memory usage
+            if hasattr(pd, 'get_dtype_counts'):  # Only in older pandas
+                logger.debug("Initial memory usage:")
+                logger.debug(pd.get_dtype_counts())
+            
+            # Load data without making unnecessary copies
             df_filt, feature_cols, cat_idx = self.data_processor.load_and_preprocess_data()
+            
+            # Log memory-efficient data loading
             logger.info(f"✓ Data loaded and preprocessed successfully. Shape: {df_filt.shape}")
             logger.info(f"  Features: {len(feature_cols)} total, {len(cat_idx)} categorical")
+            logger.debug(f"DataFrame memory usage: {df_filt.memory_usage(deep=True).sum() / (1024**2):.2f} MB")
             
             # 2. Run imputation
             current_step = "imputation"
@@ -163,13 +172,21 @@ class Pipeline:
             logger.info("STEP 3/4: ANALYZING RESULTS")
             logger.info("="*50)
             
+            # Create a view of the original data instead of a copy where possible
+            # Using getattr with a default of False for safer attribute access
+            is_view = getattr(df_filt, '_is_view', False)
+            original_view = df_filt if is_view else df_filt.copy(deep=False)
+            
             results_summary, pooled_metrics, scenario_names, original_props = self.analysis.analyze_results(
                 scenario_proportions=scenario_proportions,
                 imputed_dataset=last_imputed_dataset,
-                original_dataset=df_filt.copy(),  # Pass original df for comparison
+                original_dataset=original_view,  # Use view instead of deep copy
                 model_performance=model_performance,
                 model_artifacts=last_model_artifacts
             )
+            
+            # Clear memory if needed
+            del original_view
             
             # Store pooled_metrics as an instance variable for diagnostics
             self.analysis.pooled_metrics = pooled_metrics
@@ -191,12 +208,23 @@ class Pipeline:
             # 5. Run diagnostics
             current_step = "diagnostics"
             logger.info("\nRunning diagnostics...")
-            self.analysis.run_diagnostics(
-                model_performance=model_performance,
-                model_artifacts=last_model_artifacts,
-                imputed_dataset=last_imputed_dataset,
-                original_dataset=df_filt.copy()  # Pass original df for comparison
-            )
+            
+            # Create a view of the original data for diagnostics if possible
+            # Using getattr with a default of False for safer attribute access
+            is_view = getattr(df_filt, '_is_view', False)
+            diag_original = df_filt if is_view else df_filt.copy(deep=False)
+            
+            try:
+                self.analysis.run_diagnostics(
+                    model_performance=model_performance,
+                    model_artifacts=last_model_artifacts,
+                    imputed_dataset=last_imputed_dataset,
+                    original_dataset=diag_original  # Use view instead of deep copy
+                )
+            finally:
+                # Ensure we clean up the view
+                if 'diag_original' in locals() and diag_original is not df_filt:
+                    del diag_original
 
             # 6. Create visualizations
             current_step = "visualization"
@@ -214,19 +242,33 @@ class Pipeline:
             if hasattr(self.analysis, 'generate_and_export_report'):
                 logger.info("\nGenerating and exporting report...")
                 try:
-                    # Get known data (non-imputed) for reporting
+                    # Get known data (non-imputed) for reporting - use a mask to avoid copying until needed
                     target_var = self.config.TARGET_VARIABLE
-                    df_known = df_filt[df_filt[target_var] != '99'].copy()
+                    known_mask = df_filt[target_var] != '99'
                     
-                    self.analysis.generate_and_export_report(
-                        df_original=df_filt,
-                        df_known=df_known,
-                        df_imputed=last_imputed_dataset,
-                        results_summary=results_summary,
-                        model_performance=model_performance,
-                        final_results=final_results,
-                        classes_=list(original_props.index)
-                    )
+                    # Only create copies if the data will be modified
+                    df_known = df_filt[known_mask].copy() if known_mask.any() else pd.DataFrame()
+                    
+                    # Create a view of the original data for reporting
+                    report_original = df_filt if df_filt.is_view else df_filt.copy(deep=False)
+                    
+                    try:
+                        self.analysis.generate_and_export_report(
+                            df_original=report_original,
+                            df_known=df_known,
+                            df_imputed=last_imputed_dataset,
+                            results_summary=results_summary,
+                            model_performance=model_performance,
+                            final_results=final_results,
+                            classes_=list(original_props.index)
+                        )
+                    finally:
+                        # Clean up the view
+                        if 'report_original' in locals() and report_original is not df_filt:
+                            del report_original
+                            
+                        if 'df_known' in locals():
+                            del df_known
                 except Exception as e:
                     self._log_error_with_traceback(e, {
                         'step': 'report_generation',
@@ -238,13 +280,22 @@ class Pipeline:
             logger.info(f"PIPELINE COMPLETED SUCCESSFULLY - {pd.Timestamp.now()}")
             logger.info("="*80)
             
-            return {
+            # Create a lightweight result dictionary with minimal data copying
+            result = {
                 'status': 'success',
                 'imputed_data': last_imputed_dataset,
                 'results_summary': results_summary,
-                'final_results': final_results,
-                'model_performance': model_performance
+                'final_results': final_results.copy() if hasattr(final_results, 'copy') else final_results,
+                'model_performance': {k: v.copy() if hasattr(v, 'copy') else v 
+                                   for k, v in model_performance.items()}
             }
+            
+            # Log final memory usage
+            if hasattr(pd, 'get_dtype_counts'):  # Only in older pandas
+                logger.debug("Final memory usage:")
+                logger.debug(pd.get_dtype_counts())
+                
+            return result
 
         except Exception as e:
             error_context = {
