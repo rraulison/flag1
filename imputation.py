@@ -75,6 +75,7 @@ class ImputationEngine:
         # Initialize results storage
         start_iter = 0
         imputation_results = []
+        last_imputed_dataset = None
         
         try:
             for i in range(start_iter, self.config.N_IMPUTATIONS):
@@ -83,10 +84,11 @@ class ImputationEngine:
                 
                 try:
                     with imputation_timer(i + 1):
-                        imputed_df_single_run = self._run_single_imputation(
+                        imputed_proportions, imputed_df_single_run = self._run_single_imputation(
                             df, feature_cols, cat_idx, i
                         )
-                        imputation_results.append(imputed_df_single_run)
+                        imputation_results.append(imputed_proportions)
+                        last_imputed_dataset = imputed_df_single_run
                         
                         iteration_time = time.time() - start_time
                         logger.info(f"Completed imputation {i+1}/{self.config.N_IMPUTATIONS} "
@@ -109,7 +111,7 @@ class ImputationEngine:
             if not imputation_results:
                 raise ValueError("No imputation results were generated. Check for errors in the imputation process.")
                 
-            final_imputed_dataset = imputation_results[-1]
+            final_imputed_dataset = last_imputed_dataset
             if not isinstance(final_imputed_dataset, dict):
                 raise TypeError(f"Expected final_imputed_dataset to be a dict, got {type(final_imputed_dataset).__name__}")
                 
@@ -127,7 +129,7 @@ class ImputationEngine:
 
     def _run_single_imputation(
         self, df: pd.DataFrame, feature_cols: List[str], cat_idx: List[int], iteration: int
-    ) -> pd.DataFrame:
+    ) -> Tuple[Dict[str, pd.Series], Dict[str, pd.DataFrame]]:
         """Executes a single two-step imputation: flag imputation then ordinal imputation."""
         
         df_known = df[df[self.config.TARGET_VARIABLE] != '99'].copy()
@@ -140,10 +142,13 @@ class ImputationEngine:
         )
         
         all_reconstructed_dfs = {}
+        all_proportions = {}
 
         # Reconstruct MAR scenario from the main dataframe returned by _impute_ordinal
         df_reconstructed_mar = self._reconstruct_staging(df_imputed_ordinal_mar.copy())
         all_reconstructed_dfs['mar'] = df_reconstructed_mar
+        all_proportions['mar'] = df_reconstructed_mar[self.config.TARGET_VARIABLE].value_counts(normalize=True)
+
 
         # Reconstruct MNAR scenarios using the dictionary of imputed values
         # The flag-imputed dataframe is the base for all scenarios
@@ -160,8 +165,9 @@ class ImputationEngine:
             
             df_reconstructed_scenario = self._reconstruct_staging(df_scenario)
             all_reconstructed_dfs[scenario_name] = df_reconstructed_scenario
+            all_proportions[scenario_name] = df_reconstructed_scenario[self.config.TARGET_VARIABLE].value_counts(normalize=True)
             
-        return all_reconstructed_dfs
+        return all_proportions, all_reconstructed_dfs
 
     def _reconstruct_staging(self, df: pd.DataFrame) -> pd.DataFrame:
         """Reconstructs the final 'ESTADIAM' column after imputation."""
@@ -598,15 +604,14 @@ class ImputationEngine:
 
         return model, val_logloss
 
-    def _aggregate_proportions(self, imputation_results: List[Dict[str, pd.DataFrame]]) -> Dict:
+    def _aggregate_proportions(self, imputation_results: List[Dict[str, pd.Series]]) -> Dict:
         """Aggregates proportions from multiple imputation runs for each scenario."""
         scenario_proportions = {scenario: [] for scenario in self.config.MNAR_SCENARIOS.keys()}
         scenario_proportions['mar'] = []
 
         for run_dict in imputation_results:
-            for scenario_name, df in run_dict.items():
+            for scenario_name, proportions in run_dict.items():
                 if scenario_name in scenario_proportions:
-                    proportions = df[self.config.TARGET_VARIABLE].value_counts(normalize=True)
                     scenario_proportions[scenario_name].append(proportions)
         
         return scenario_proportions 
