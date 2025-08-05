@@ -1,0 +1,47 @@
+2025-08-05 13:48:20,957 - src.pipeline - INFO - Initializing pipeline components...
+2025-08-05 13:48:20,957 - src.pipeline - INFO - Pipeline initialized successfully. Output will be saved to: /app/outputs/cancer_staging_imputation_20250805_134820
+2025-08-05 13:48:20,957 - src.pipeline - INFO - ================================================================================
+2025-08-05 13:48:20,957 - src.pipeline - INFO - STARTING PIPELINE EXECUTION - 2025-08-05 13:48:20.957722
+2025-08-05 13:48:20,957 - src.pipeline - INFO - ================================================================================
+2025-08-05 13:48:20,958 - src.pipeline - INFO -
+==================================================
+2025-08-05 13:48:20,958 - src.pipeline - INFO - STEP 1/4: LOADING AND PREPROCESSING DATA
+2025-08-05 13:48:20,958 - src.pipeline - INFO - ==================================================
+2025-08-05 13:48:20,958 - src.data_processing - INFO - Loading data from /app/data/df_preprocessed.parquet
+2025-08-05 13:48:20,959 - src.pipeline - ERROR -
+================================================================================
+PIPELINE ERROR: ImportError
+Message: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.
+ - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet.
+
+Context:
+  step: data_loading
+  error_type: ImportError
+  output_prefix: /app/outputs/cancer_staging_imputation_20250805_134820
+
+Full traceback:
+Traceback (most recent call last):
+  File "/app/src/pipeline.py", line 144, in run
+    df_filt, feature_cols, cat_idx = self.data_processor.load_and_preprocess_data()
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/data_processing.py", line 18, in load_and_preprocess_data
+    df_filt = self._load_data()
+              ^^^^^^^^^^^^^^^^^
+  File "/app/src/data_processing.py", line 44, in _load_data
+    return pd.read_parquet(self.config.DATA_FILE)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/site-packages/pandas/io/parquet.py", line 653, in read_parquet
+    impl = get_engine(engine)
+           ^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/site-packages/pandas/io/parquet.py", line 68, in get_engine
+    raise ImportError(
+ImportError: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.
+A suitable version of pyarrow or fastparquet is required for parquet support.
+Trying to import the above resulted in these errors:
+ - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.
+ - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet.
+================================================================================
+2025-08-05 13:48:20,960 - src.pipeline - INFO - Full error details written to: /app/outputs/cancer_staging_imputation_20250805_134820_error.log

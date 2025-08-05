@@ -1,0 +1,46 @@
+2025-08-05 13:48:46,635 - src.pipeline - INFO - Initializing pipeline components...
+2025-08-05 13:48:46,636 - src.pipeline - INFO - Pipeline initialized successfully. Output will be saved to: /app/outputs/cancer_staging_imputation_20250805_134846
+2025-08-05 13:48:46,636 - src.pipeline - INFO - ================================================================================
+2025-08-05 13:48:46,636 - src.pipeline - INFO - STARTING PIPELINE EXECUTION - 2025-08-05 13:48:46.636212
+2025-08-05 13:48:46,636 - src.pipeline - INFO - ================================================================================
+2025-08-05 13:48:46,636 - src.pipeline - INFO -
+==================================================
+2025-08-05 13:48:46,636 - src.pipeline - INFO - STEP 1/4: LOADING AND PREPROCESSING DATA
+2025-08-05 13:48:46,636 - src.pipeline - INFO - ==================================================
+2025-08-05 13:48:46,636 - src.data_processing - INFO - Loading data from /app/data/df_preprocessed.parquet
+2025-08-05 13:48:46,657 - src.pipeline - ERROR -
+================================================================================
+PIPELINE ERROR: FileNotFoundError
+Message: [Errno 2] No such file or directory: '/app/data/df_preprocessed.parquet'
+
+Context:
+  step: data_loading
+  error_type: FileNotFoundError
+  output_prefix: /app/outputs/cancer_staging_imputation_20250805_134846
+
+Full traceback:
+Traceback (most recent call last):
+  File "/app/src/pipeline.py", line 144, in run
+    df_filt, feature_cols, cat_idx = self.data_processor.load_and_preprocess_data()
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/data_processing.py", line 18, in load_and_preprocess_data
+    df_filt = self._load_data()
+              ^^^^^^^^^^^^^^^^^
+  File "/app/src/data_processing.py", line 44, in _load_data
+    return pd.read_parquet(self.config.DATA_FILE)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/site-packages/pandas/io/parquet.py", line 669, in read_parquet
+    return impl.read(
+           ^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/site-packages/pandas/io/parquet.py", line 258, in read
+    path_or_handle, handles, filesystem = _get_path_or_handle(
+                                          ^^^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/site-packages/pandas/io/parquet.py", line 141, in _get_path_or_handle
+    handles = get_handle(
+              ^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.11/lib/python3.12/site-packages/pandas/io/common.py", line 882, in get_handle
+    handle = open(handle, ioargs.mode)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/app/data/df_preprocessed.parquet'
+================================================================================
+2025-08-05 13:48:46,658 - src.pipeline - INFO - Full error details written to: /app/outputs/cancer_staging_imputation_20250805_134846_error.log

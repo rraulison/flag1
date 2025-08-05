@@ -3,8 +3,8 @@
 Main script to run the revised imputation pipeline (v6).
 """
 import logging
-from flag1.config import config
-from flag1.pipeline import Pipeline
+from .config import config
+from .pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
 
